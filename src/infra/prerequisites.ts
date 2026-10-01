@@ -34,14 +34,8 @@ const PREREQUISITES: PrerequisiteCheck[] = [
     versionFlag: '--version',
     required: true,
   },
-  {
-    name: 'AWS CLI',
-    command: 'aws',
-    versionFlag: '--version',
-    required: false,
-    providerKeys: ['aws'],
-    enabledCheck: (config) => config.providers.aws.enabled,
-  },
+  // No AWS CLI entry: the AWS provider talks to S3/IAM through @aws-sdk only and never shells out,
+  // so requiring the `aws` binary blocked whole runs on a tool nothing invokes.
   {
     name: 'GitHub CLI',
     command: 'gh',

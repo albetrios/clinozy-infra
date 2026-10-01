@@ -344,9 +344,27 @@ export async function provision(
         // 2 access keys, so on a re-run we never blindly create a third: reuse the key already in
         // `.env.<environment>`, and when the user is at the 2-key limit give actionable guidance
         // instead of the raw `Cannot exceed quota for AccessKeysPerUser` error.
+        //
+        // Reuse only a key this user actually owns: after a rename the env file still holds the
+        // PREVIOUS user's key (scoped to the previous bucket), and reusing it left the new user
+        // keyless and every upload to the new bucket AccessDenied.
         const existingAccessKeyId = readEnvFileValue(environmentName, 'S3_ACCESS_KEY_ID');
         const existingSecretAccessKey = readEnvFileValue(environmentName, 'S3_SECRET_ACCESS_KEY');
-        if (existingAccessKeyId && existingSecretAccessKey) {
+        const existingKeys = await iamClient.send(
+          new ListAccessKeysCommand({ UserName: iamUsername }),
+        );
+        const ownedKeyIds = (existingKeys.AccessKeyMetadata ?? []).map((key) => key.AccessKeyId);
+        const envKeyIsOwned = Boolean(
+          existingAccessKeyId &&
+            existingSecretAccessKey &&
+            ownedKeyIds.includes(existingAccessKeyId),
+        );
+        if (existingAccessKeyId && !envKeyIsOwned) {
+          logger.warn(
+            `  The S3 key in .env.${environmentName} does not belong to "${iamUsername}" — creating one that does`,
+          );
+        }
+        if (envKeyIsOwned && existingAccessKeyId && existingSecretAccessKey) {
           iamUsers[environmentName] = {
             username: iamUsername,
             arn: userArn,
@@ -357,10 +375,7 @@ export async function provision(
             `  Reusing existing access key for "${iamUsername}" from .env.${environmentName}`,
           );
         } else {
-          const existingKeys = await iamClient.send(
-            new ListAccessKeysCommand({ UserName: iamUsername }),
-          );
-          if ((existingKeys.AccessKeyMetadata?.length ?? 0) >= 2) {
+          if (ownedKeyIds.length >= 2) {
             throw new SetupError(
               `IAM user "${iamUsername}" already has the maximum 2 access keys, and no usable key is stored in .env.${environmentName}.`,
               {
