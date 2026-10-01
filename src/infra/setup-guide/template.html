@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>clinozy-infra setup guide</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    --bg: #0c0d11; --tx: #f4f5f9; --tx-2: #9ba4b4; --tx-3: #6c7585;
+    --hair: rgba(255,255,255,0.075); --hair-2: rgba(255,255,255,0.12);
+    --accent: #f2a23f; --accent-soft: rgba(242,162,63,0.14); --good: #62d69a; --info: #7fb2ff;
+    --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    margin: 0; position: relative; background: var(--bg); color: var(--tx);
+    font-family: var(--font); line-height: 1.5; min-height: 100vh; padding-bottom: 6rem; -webkit-font-smoothing: antialiased;
+  }
+  .fx-progress { position: sticky; top: 0; z-index: 30; height: 2px; background: rgba(255,255,255,0.06); }
+  .fx-progress i { display: block; height: 100%; width: 0; background: var(--accent); box-shadow: 0 0 14px rgba(242,162,63,0.6); transition: width 620ms cubic-bezier(.16,1,.3,1); }
+  .fx-bloom { position: absolute; top: 0; left: 0; right: 0; height: 520px; z-index: 0; pointer-events: none;
+    background: radial-gradient(46% 60% at 16% -4%, rgba(242,162,63,0.16), transparent 66%), radial-gradient(42% 52% at 88% 2%, rgba(96,120,214,0.10), transparent 70%); }
+  .fx-wrap { position: relative; z-index: 1; max-width: 760px; margin: 0 auto; padding: 0 28px; }
+  .fx-hero { padding: 84px 0 40px; }
+  .fx-eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--tx-3); margin-bottom: 22px; }
+  .fx-eyebrow b { color: var(--accent); font-weight: 400; }
+  .fx-hero h1 { margin: 0; font-size: 46px; font-weight: 500; letter-spacing: -0.03em; line-height: 1.06; }
+  .fx-hero h1 .env { color: var(--accent); }
+  .fx-lede { margin: 20px 0 0; color: var(--tx-2); font-size: 17px; line-height: 1.6; max-width: 46ch; }
+  .fx-envs { display: inline-flex; gap: 4px; margin-top: 34px; padding: 4px; background: rgba(255,255,255,0.04); border-radius: 12px; }
+  .fx-envs button { font: inherit; font-size: 13px; font-family: var(--mono); color: var(--tx-2); background: none; border: 0; padding: 7px 14px; border-radius: 9px; cursor: pointer; transition: color 160ms ease, background 160ms ease; }
+  .fx-envs button:hover { color: var(--tx); }
+  .fx-envs button[aria-pressed="true"] { background: var(--tx); color: var(--bg); }
+  .fx-envs .add { font-family: var(--font); color: var(--tx-3); }
+  .fx-envs .add:hover { color: var(--accent); }
+  .fx-meta { margin-top: 26px; display: flex; align-items: center; gap: 14px; font-size: 14px; color: var(--tx-2); }
+  .fx-meta .n { font-family: var(--mono); font-size: 34px; font-weight: 500; letter-spacing: -0.02em; color: var(--tx); line-height: 1; }
+  .fx-meta .n b { color: var(--accent); font-weight: 500; }
+  .fx-meta .of { font-family: var(--mono); font-size: 13px; color: var(--tx-3); }
+  .fx-actions { display: flex; gap: 20px; flex-wrap: wrap; align-items: center; margin: 40px 0 0; padding-top: 26px; border-top: 1px solid var(--hair); }
+  .fx-cta { display: inline-flex; align-items: center; gap: 9px; font: inherit; font-size: 14px; cursor: pointer; background: none; border: 0; padding: 0; color: var(--tx); transition: color 150ms ease; }
+  .fx-cta:hover { color: var(--accent); }
+  .fx-cta .ico { width: 34px; height: 34px; border-radius: 10px; background: var(--accent-soft); display: grid; place-items: center; flex: none; transition: background 150ms ease; }
+  .fx-cta:hover .ico { background: rgba(242,162,63,0.24); }
+  .fx-cta .ico svg { width: 17px; height: 17px; stroke: var(--accent); fill: none; stroke-width: 2; }
+  .fx-cta .sub { display: block; font-size: 11.5px; color: var(--tx-3); font-family: var(--mono); margin-top: 1px; }
+  .fx-cta .lab { text-align: left; font-weight: 500; }
+  .fx-cheer { display: none; align-items: center; gap: 14px; margin-top: 34px; padding: 18px 20px; border-radius: 16px; background: linear-gradient(180deg, rgba(98,214,154,0.10), rgba(98,214,154,0.04)); border: 1px solid rgba(98,214,154,0.24); }
+  .fx-cheer.on { display: flex; }
+  .fx-cheer .r { width: 34px; height: 34px; border-radius: 50%; background: var(--good); display: grid; place-items: center; flex: none; }
+  .fx-cheer .r svg { width: 18px; height: 18px; stroke: var(--bg); stroke-width: 3; fill: none; }
+  .fx-cheer b { font-weight: 500; font-size: 15px; }
+  .fx-cheer span { color: var(--tx-2); font-size: 13.5px; }
+  .fx-cheer code { font-family: var(--mono); color: var(--accent); font-size: 12.5px; }
+  .fx-sec { margin-top: 64px; }
+  .fx-sec-h { display: flex; align-items: flex-start; gap: 20px; padding-bottom: 8px; }
+  .fx-sec-h .num { font-family: var(--mono); font-size: 15px; color: var(--tx-3); padding-top: 6px; }
+  .fx-sec-h h2 { margin: 0; font-size: 24px; font-weight: 500; letter-spacing: -0.02em; }
+  .fx-sec-h .to { display: block; font-family: var(--mono); font-size: 12.5px; color: var(--tx-3); margin-top: 5px; }
+  .fx-rows { margin-top: 10px; }
+  .fx-row { display: grid; grid-template-columns: 26px 1fr auto; gap: 18px; align-items: start; padding: 20px 0; border-top: 1px solid var(--hair); transition: opacity 220ms ease; }
+  .fx-row:first-child { border-top: 0; }
+  .fx-row.complete { opacity: 0.5; }
+  .fx-dot { margin-top: 3px; width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid var(--hair-2); display: grid; place-items: center; padding: 0; flex: none; }
+  .fx-dot svg { width: 12px; height: 12px; stroke: var(--bg); stroke-width: 3; fill: none; opacity: 0; }
+  .fx-dot.complete { background: var(--good); border-color: var(--good); }
+  .fx-dot.complete svg { opacity: 1; }
+  .fx-dot.partial { border-color: var(--accent); }
+  .fx-dot.partial::after { content: ""; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); }
+  .fx-legend { margin-top: 12px; display: flex; gap: 16px; font-family: var(--mono); font-size: 11.5px; color: var(--tx-3); }
+  .fx-legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .fx-legend i { width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid var(--hair-2); }
+  .fx-legend i.c { background: var(--good); border-color: var(--good); }
+  .fx-legend i.p { border-color: var(--accent); background: var(--accent); }
+  .fx-name { display: flex; align-items: center; gap: 10px; }
+  .fx-name b { font-weight: 500; font-size: 17px; letter-spacing: -0.01em; }
+  .fx-kind { font-family: var(--mono); font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--tx-3); }
+  .fx-kind::before { content: "· "; }
+  .fx-desc { color: var(--tx-2); font-size: 14px; margin-top: 5px; max-width: 44ch; }
+  .fx-writes { margin-top: 9px; font-family: var(--mono); font-size: 11.5px; color: var(--tx-3); }
+  .fx-writes em { font-style: normal; color: var(--tx-2); }
+  .fx-writes .fe { color: var(--info); }
+  .fx-side { display: flex; flex-direction: column; align-items: flex-end; gap: 9px; }
+  .fx-get { color: var(--tx-2); text-decoration: none; font-size: 13px; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; transition: color 150ms ease; }
+  .fx-get:hover { color: var(--info); }
+  .fx-get svg { width: 12px; height: 12px; opacity: 0.7; }
+  .fx-keys { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; max-width: 280px; }
+  .fx-key { font-family: var(--mono); font-size: 11.5px; color: var(--tx-2); background: none; border: 1px solid var(--hair-2); border-radius: 8px; padding: 4px 9px; cursor: pointer; transition: color 140ms ease, border-color 140ms ease, background 140ms ease; }
+  .fx-key:hover { color: var(--accent); border-color: rgba(242,162,63,0.5); }
+  .fx-key:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .fx-key.copied { color: var(--good); border-color: var(--good); background: rgba(98,214,154,0.12); }
+  .fx-auto { font-family: var(--mono); font-size: 12px; color: var(--tx-3); }
+  .fx-info { width: 19px; height: 19px; border-radius: 50%; border: 1px solid var(--hair-2); background: none; color: var(--tx-3); font-family: var(--mono); font-size: 11px; font-style: italic; line-height: 1; cursor: pointer; display: inline-grid; place-items: center; padding: 0; transition: color 140ms ease, border-color 140ms ease; }
+  .fx-info:hover { color: var(--accent); border-color: var(--accent); }
+  .fx-info:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .fx-row.open .fx-info { color: var(--accent); border-color: var(--accent); }
+  .fx-steps { grid-column: 1 / -1; overflow: hidden; max-height: 0; opacity: 0; margin-top: 0; transition: max-height 340ms ease, opacity 260ms ease, margin-top 340ms ease; }
+  .fx-row.open .fx-steps { max-height: 460px; opacity: 1; margin-top: 14px; }
+  .fx-steps-in { padding: 16px 18px; background: rgba(255,255,255,0.03); border: 1px solid var(--hair); border-radius: 12px; }
+  .fx-open { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 500; color: var(--bg); background: var(--accent); border-radius: 9px; padding: 8px 13px; text-decoration: none; margin-bottom: 13px; }
+  .fx-open:hover { background: #ffb24d; }
+  .fx-open svg { width: 13px; height: 13px; }
+  .fx-steps ol { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 9px; }
+  .fx-steps li { color: var(--tx-2); font-size: 13.5px; line-height: 1.5; }
+  .fx-steps li::marker { color: var(--accent); font-family: var(--mono); font-size: 12px; }
+  .fx-run { margin-top: 12px; display: flex; flex-direction: column; gap: 10px; }
+  .fx-cmd { display: flex; gap: 14px; align-items: baseline; font-size: 14px; color: var(--tx-2); }
+  .fx-cmd code { font-family: var(--mono); font-size: 12.5px; color: var(--accent); white-space: nowrap; }
+  .fx-safe { margin-top: 64px; padding-top: 26px; border-top: 1px solid var(--hair); display: grid; grid-template-columns: repeat(3,1fr); gap: 26px; }
+  .fx-safe b { display: block; font-weight: 500; font-size: 13px; margin-bottom: 4px; }
+  .fx-safe span { font-size: 12.5px; color: var(--tx-2); line-height: 1.55; }
+  .fx-safe .k { font-family: var(--mono); font-size: 11px; color: var(--tx-3); }
+  .fx-toast { position: fixed; left: 50%; bottom: 30px; transform: translate(-50%, 16px); background: var(--tx); color: var(--bg); font-family: var(--mono); font-size: 12.5px; padding: 10px 16px; border-radius: 11px; opacity: 0; pointer-events: none; transition: opacity 190ms ease, transform 190ms ease; z-index: 40; box-shadow: 0 10px 30px rgba(0,0,0,0.45); }
+  .fx-toast.on { opacity: 1; transform: translate(-50%, 0); }
+  body.js .fx-row, body.js .fx-sec-h, body.js .fx-actions, body.js .fx-safe { opacity: 0; transform: translateY(14px); transition: opacity 620ms cubic-bezier(.16,1,.3,1), transform 620ms cubic-bezier(.16,1,.3,1); }
+  body.js .in { opacity: 1; transform: none; }
+  @media (max-width: 640px) {
+    .fx-hero { padding: 60px 0 32px; } .fx-hero h1 { font-size: 33px; }
+    .fx-row { grid-template-columns: 26px 1fr; }
+    .fx-side { grid-column: 1 / -1; align-items: flex-start; margin-left: 44px; margin-top: 4px; }
+    .fx-keys { justify-content: flex-start; max-width: none; }
+    .fx-safe { grid-template-columns: 1fr; gap: 18px; } .fx-sec-h { gap: 14px; }
+  }
+  @media (prefers-reduced-motion: reduce) { *, body.js .fx-row, body.js .fx-sec-h, body.js .fx-actions, body.js .fx-safe { transition: none !important; opacity: 1 !important; transform: none !important; } }
+</style>
+</head>
+<body>
+  <div class="fx-progress" aria-hidden="true"><i id="fx-bar"></i></div>
+  <div class="fx-bloom" aria-hidden="true"></div>
+  <main class="fx-wrap">
+    <header class="fx-hero">
+      <div class="fx-eyebrow"><b id="fx-project">project</b> · provisioning guide</div>
+      <h1>Let's wire up <span class="env" id="fx-env">development</span>.</h1>
+      <p class="fx-lede">Grab each key from its dashboard, drop it where it belongs, run setup. Every environment keeps its own progress.</p>
+      <div class="fx-envs" id="fx-envs" role="group" aria-label="Environment"></div>
+      <div class="fx-meta"><span class="n"><b id="fx-pct">0%</b></span><span>configured · <span class="of" id="fx-count">0 of 0</span></span></div>
+      <div class="fx-legend"><span><i class="c"></i>set</span><span><i class="p"></i>partial</span><span><i></i>missing</span></div>
+    </header>
+    <div class="fx-actions">
+      <button class="fx-cta" id="fx-copy-creds"><span class="ico"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg></span><span class="lab">Copy credentials template<span class="sub">every account key → .setup-credentials</span></span></button>
+      <button class="fx-cta" id="fx-copy-env"><span class="ico"><svg viewBox="0 0 24 24"><path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z"/></svg></span><span class="lab">Copy starter env<span class="sub" id="fx-env-file">.env.development</span></span></button>
+    </div>
+    <div class="fx-cheer" id="fx-cheer" role="status"><span class="r"><svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg></span><div><b id="fx-cheer-t">wired up.</b><br><span>Run <code>pnpm setup:infra</code>, then <code>setup:infra:status</code> to confirm.</span></div></div>
+    <div id="fx-sections"></div>
+    <section class="fx-sec"><div class="fx-sec-h"><span class="num">▸</span><div><h2>Then run it</h2></div></div>
+      <div class="fx-run">
+        <div class="fx-cmd"><code>pnpm setup:infra:doctor</code> catch config footguns first</div>
+        <div class="fx-cmd"><code>pnpm setup:infra:plan</code> read-only — see what will be created</div>
+        <div class="fx-cmd"><code>pnpm setup:infra</code> apply, guided, one service at a time</div>
+        <div class="fx-cmd"><code>pnpm setup:infra:status</code> confirm every environment reads OK</div>
+      </div></section>
+    <div class="fx-safe">
+      <div><b>Validated on load</b><span>a schema in <span class="k">secrets.ts</span> checks every key before use</span></div>
+      <div><b>Copy, never print</b><span>values only reach the clipboard, auto-cleared after 30s — never the screen or logs</span></div>
+      <div><b>Never committed</b><span><span class="k">.env*</span> + <span class="k">.setup-credentials</span> are gitignored and agent-unreadable</span></div>
+    </div>
+  </main>
+  <div class="fx-toast" id="fx-toast" role="status" aria-live="polite"></div>
+
+<script>
+window.__GUIDE__ = /*__GUIDE_DATA__*/ null;
+</script>
+<script>
+(function () {
+  var G = window.__GUIDE__ || { project:"project", credsFile:".setup/.setup-credentials", environments:["development"], services:[] };
+  var SERVICES = G.services || [];
+  var CREDS_FILE = G.credsFile || ".setup/.setup-credentials";
+  var GROUPS = [
+    { id:"account", num:"01", h:"Get your keys", to:"→ "+CREDS_FILE },
+    { id:"paste", num:"02", h:"Paste per environment", to:"→ .env.<env>" },
+    { id:"auto", num:"03", h:"Handled for you", to:"no key needed" }
+  ];
+  document.getElementById("fx-project").textContent = G.project;
+
+  var LS_ENVS="coreinfra.guide.envs."+G.project;
+  var envs, current, firstRender=true;
+  function load(){ try{envs=JSON.parse(localStorage.getItem(LS_ENVS));}catch(e){} if(!Array.isArray(envs)||!envs.length)envs=(G.environments||["development"]).slice(); current=envs[0]; }
+  function persist(){ try{localStorage.setItem(LS_ENVS,JSON.stringify(envs));}catch(e){} }
+  function statusOf(s){ return (s.status&&s.status[current])||"missing"; }
+
+  var toastT;
+  function toast(m){ var t=document.getElementById("fx-toast"); t.textContent=m; t.classList.add("on"); clearTimeout(toastT); toastT=setTimeout(function(){t.classList.remove("on");},1700); }
+  var CLEAR_MS=30000, clearT;
+  function scheduleClear(){ clearTimeout(clearT); clearT=setTimeout(function(){ if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText("").catch(function(){}); },CLEAR_MS); }
+  function copy(text,label,el){ if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(text).then(function(){ toast((label||"Copied")+"  ·  clears in 30s"); scheduleClear(); if(el){el.classList.add("copied");setTimeout(function(){el.classList.remove("copied");},1100);} },function(){toast(text);}); } else { toast(text); } }
+
+  function esc(s){ return String(s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];}); }
+  var EXT='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17L17 7M9 7h8v8"/></svg>';
+  function chip(k,eq){ var v=k+(eq?"=":""); return '<button class="fx-key" data-copy="'+esc(v)+'" title="Copy '+esc(v)+'">'+esc(k)+(eq?" =":"")+'</button>'; }
+
+  function rowHTML(s){
+    var st=statusOf(s), side="";
+    if(s.dashboard) side+='<a class="fx-get" href="'+esc(s.dashboard.url)+'" target="_blank" rel="noopener">'+esc(s.dashboard.label)+EXT+'</a>';
+    if(s.group==="account") side+='<div class="fx-keys">'+(s.credentials||[]).map(function(k){return chip(k,true);}).join("")+'</div>';
+    else if(s.group==="paste") side+='<div class="fx-keys">'+(s.outputs||[]).map(function(k){return chip(k,true);}).join("")+'</div>';
+    else side+='<span class="fx-auto">no key</span>';
+
+    var w="";
+    if(s.group!=="paste"&&s.outputs.length) w='writes <em>'+esc(s.outputs.join(", "))+'</em> → .env.'+esc(current);
+    else if(s.group==="paste") w='saved to .env.'+esc(current);
+    else w='syncs to the remote — no .env keys';
+    if((s.feKeys||[]).length) w+=' · <span class="fe">clinozy-fe: '+esc(s.feKeys.join(", "))+'</span>';
+
+    var steps='<div class="fx-steps"><div class="fx-steps-in">'+
+      (s.dashboard?'<a class="fx-open" href="'+esc(s.dashboard.url)+'" target="_blank" rel="noopener">Open '+esc(s.dashboard.label)+' '+EXT+'</a>':'')+
+      '<ol>'+(s.steps||[]).map(function(step){return '<li>'+esc(step)+'</li>';}).join('')+'</ol>'+
+    '</div></div>';
+
+    return '<div class="fx-row '+st+'">'+
+      '<span class="fx-dot '+st+'" role="img" aria-label="'+st+'" title="'+esc(s.name)+': '+st+'"><svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg></span>'+
+      '<div><div class="fx-name"><b>'+esc(s.name)+'</b><span class="fx-kind">'+esc(s.kind)+'</span>'+
+        '<button class="fx-info" data-info aria-expanded="false" aria-label="Steps for '+esc(s.name)+'">i</button></div>'+
+        '<div class="fx-writes">'+w+'</div></div>'+
+      '<div class="fx-side">'+side+'</div>'+
+      steps+
+    '</div>';
+  }
+
+  function reveal(){
+    if(!("IntersectionObserver" in window)||matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    document.body.classList.add("js");
+    var io=new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting){e.target.classList.add("in");io.unobserve(e.target);}});},{threshold:0.12,rootMargin:"0px 0px -8% 0px"});
+    document.querySelectorAll(".fx-row,.fx-sec-h,.fx-actions,.fx-safe").forEach(function(el){io.observe(el);});
+  }
+
+  function render(){
+    document.getElementById("fx-envs").innerHTML=envs.map(function(e){return '<button data-env="'+esc(e)+'" aria-pressed="'+(e===current)+'">'+esc(e)+'</button>';}).join("")+'<button class="add" data-add="1" aria-label="Add environment">+ env</button>';
+    document.getElementById("fx-env").textContent=current;
+    document.getElementById("fx-env-file").textContent=".env."+current;
+
+    var total=SERVICES.length, d=SERVICES.filter(function(s){return statusOf(s)==="complete";}).length, pct=total?Math.round(d/total*100):0;
+    document.getElementById("fx-bar").style.width=pct+"%";
+    document.getElementById("fx-pct").textContent=pct+"%";
+    document.getElementById("fx-count").textContent=d+" of "+total;
+    document.getElementById("fx-cheer").classList.toggle("on",total>0&&d===total);
+    document.getElementById("fx-cheer-t").textContent=current+" is fully wired up.";
+
+    var html="";
+    GROUPS.forEach(function(g){
+      var items=SERVICES.filter(function(s){return s.group===g.id;});
+      if(!items.length)return;
+      html+='<section class="fx-sec"><div class="fx-sec-h"><span class="num">'+g.num+'</span><div><h2>'+esc(g.h)+'</h2><span class="to">'+esc(g.to)+'</span></div></div><div class="fx-rows">'+items.map(rowHTML).join("")+'</div></section>';
+    });
+    document.getElementById("fx-sections").innerHTML=html;
+    if(firstRender){ reveal(); firstRender=false; }
+    else { document.querySelectorAll(".fx-row,.fx-sec-h,.fx-actions,.fx-safe").forEach(function(el){el.classList.add("in");}); }
+  }
+
+  function credsTemplate(){ var l=["# "+CREDS_FILE+" — fill in the values, never commit.",""]; SERVICES.forEach(function(s){ if(s.group==="account"&&(s.credentials||[]).length){ l.push("# "+s.name); s.credentials.forEach(function(k){l.push(k+"=");}); l.push(""); } }); return l.join("\n"); }
+  function envTemplate(){ var l=["# .env."+current+" — starter (setup fills most of these).",""]; SERVICES.forEach(function(s){ if((s.outputs||[]).length){ l.push("# "+s.name); s.outputs.forEach(function(k){l.push(k+"=");}); l.push(""); } }); return l.join("\n"); }
+
+  document.body.addEventListener("click",function(ev){
+    var info=ev.target.closest("[data-info]");
+    if(info){ var row=info.closest(".fx-row"); if(row){ var open=row.classList.toggle("open"); info.setAttribute("aria-expanded",String(open)); } return; }
+    var t=ev.target.closest("[data-copy],[data-env],[data-add]");
+    if(t){
+      if(t.hasAttribute("data-copy")) copy(t.getAttribute("data-copy"),"Copied "+t.getAttribute("data-copy"),t);
+      else if(t.hasAttribute("data-env")){ current=t.getAttribute("data-env"); render(); }
+      else if(t.hasAttribute("data-add")){ var n=(prompt("New environment name (e.g. staging)")||"").trim().toLowerCase().replace(/[^a-z0-9_-]/g,""); if(n&&envs.indexOf(n)===-1){envs.push(n);current=n;persist();render();} }
+      return;
+    }
+    if(ev.target.closest("#fx-copy-creds")) copy(credsTemplate(),"Copied credentials template");
+    else if(ev.target.closest("#fx-copy-env")) copy(envTemplate(),"Copied .env."+current+" starter");
+  });
+
+  load(); render();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,5 @@
+autoInstallPeers: true
+
+# Allow only the build scripts clinozy-infra's toolchain needs (tsx/vitest → esbuild).
+allowBuilds:
+  esbuild: true

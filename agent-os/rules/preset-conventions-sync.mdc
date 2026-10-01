@@ -1,0 +1,44 @@
+---
+description: Conventions for authoring clinozy-infra provisioning presets (src/presets/) — pick the right kind, declare outputs, choose a generic provider, keep the catalog lint-clean. Points at the preset-author skill.
+globs: src/presets/**, infra.config.ts, src/engine/**
+alwaysApply: false
+---
+
+## Presets — authoring conventions
+
+Services are declared as **presets** (data over generic providers) and composed in
+`infra.config.ts`. See the [`preset-author`](../skills/preset-author/SKILL.md) skill for
+the full guide; the strict rules:
+
+### Kind
+
+- `validate` — probe a pasted credential (Resend). Carries `validate()` (also run by `--check`).
+- `guide` — dashboard walkthrough + per-env paste collection (Stripe, Google OAuth).
+  Reuses the existing collector; do not reimplement masked prompting.
+- `managed` — wraps a retained API-orchestrating provider (Neon, Railway, AWS, …) plus
+  declarative `outputs`. The heavy client + lifecycle code stays in the retained
+  `.provider.ts`.
+
+### Declare outputs (enforced)
+
+Every preset MUST declare an `outputs` array (use `[]` when it emits no env vars). Keys are
+`UPPER_SNAKE_CASE`, unique, and must appear in the generated `.env.example`. `guide` fields
+must each be a declared output and instructions must be non-empty. The
+`preset-lint.unit.test.ts` check fails the build otherwise — never weaken it to pass.
+
+### Naming — single source of truth = `setup.config.json`
+
+Names (org/project/env) come from the loaded config, never hardcoded in a preset. Identity
+lives in `setup.config.json`; resources live in `infra.config.ts`.
+
+### Generic providers stay generic
+
+New provisioning shapes go through a generic engine provider (`manual` / `httpApi` /
+`generate` / `static` / `command`) — do not add per-service bespoke provider code. If a
+shape truly cannot be expressed, add ONE new generic provider (like `command`), not a
+one-off. Presets stay data; providers stay generic.
+
+### Chaining
+
+A resource `config` may be `(env, ctx) => ({...})`; `ctx.get('KEY')` reads earlier outputs.
+The producing resource must be listed before the consumer in `infra.config.ts`.

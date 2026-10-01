@@ -1,0 +1,138 @@
+{
+  "project": {
+    "name": "clinozy-be",
+    "displayName": "Clinozy Backend",
+    "organization": "albetrios",
+    "previousNames": ["core-infra", "core-be", "core-fe"],
+    "artifacts": {
+      "apiImage": "clinozy-be-api",
+      "workerImage": "clinozy-be-worker",
+      "dockerLocalApiTag": "clinozy-be",
+      "ghcrCacheScopeApi": "clinozy-be-api",
+      "ghcrCacheScopeWorker": "clinozy-be-worker"
+    }
+  },
+  "git": {
+    "protectedBranches": ["main"],
+    "defaultBranch": "main"
+  },
+  "product": { "name": "clinozy" },
+  "frontend": {
+    "name": "clinozy-fe",
+    "url": {
+      "development": "http://localhost:5173",
+      "production": "https://clinozy-fe.netlify.app"
+    }
+  },
+  "environments": [
+    {
+      "name": "development",
+      "label": "Development",
+      "nodeEnvironment": "development",
+      "deployBranch": "main",
+      "protected": true,
+      "isDefault": true
+    },
+    {
+      "name": "production",
+      "label": "Production",
+      "nodeEnvironment": "production",
+      "deployBranch": "main",
+      "protected": true
+    }
+  ],
+  "providers": {
+    "neon": {
+      "enabled": true,
+      "region": "aws-us-east-2",
+      "pgVersion": 17,
+      "computeSize": {
+        "min": 0.25,
+        "max": 1
+      }
+    },
+    "railwayRedis": {
+      "enabled": true,
+      "region": "asia-southeast1-eqsg3a",
+      "cpuLimit": 1,
+      "memoryLimitMb": 512
+    },
+    "aws": {
+      "enabled": true,
+      "region": "us-east-1",
+      "s3BucketPrefix": "clinozy-be",
+      "iamUserPrefix": "clinozy-be-s3"
+    },
+    "sentry": {
+      "enabled": true,
+      "organization": "albetrios-7j",
+      "project": "clinozy-be",
+      "team": "albetrios",
+      "platform": "node-fastify",
+      "sampleRates": {
+        "development": {
+          "traces": 1,
+          "profile": 1
+        },
+        "production": {
+          "traces": 0.1,
+          "profile": 0.05
+        }
+      }
+    },
+    "resend": {
+      "enabled": true,
+      "fromAddress": "noreply@ig.albetrios.com",
+      "fromName": "Clinozy"
+    },
+    "stripe": {
+      "enabled": false
+    },
+    "oauth": {
+      "google": {
+        "enabled": false
+      },
+      "github": {
+        "enabled": true
+      }
+    },
+    "posthog": {
+      "enabled": true,
+      "region": "us"
+    },
+    "turnstile": {
+      "enabled": true
+    },
+    "railway": {
+      "enabled": true
+    },
+    "github": {
+      "enabled": true,
+      "repository": "albetrios/clinozy-be",
+      "syncEnvironments": false
+    },
+    "postman": {
+      "enabled": true
+    },
+    "scalar": {
+      "enabled": true
+    }
+  },
+  "app": {
+    "port": 3000,
+    "host": "0.0.0.0",
+    "rateLimitMax": {
+      "development": 10000,
+      "production": 100
+    },
+    "rateLimitWindowMs": 60000,
+    "frontendUrl": {
+      "development": "http://localhost:3000",
+      "production": ""
+    },
+    "allowedOrigins": {
+      "development": "http://localhost:3000,https://development--clinozy-fe.netlify.app",
+      "production": "https://clinozy-fe.netlify.app"
+    }
+  }
+}
