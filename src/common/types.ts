@@ -41,6 +41,8 @@ export interface EnvironmentVariables {
   DATABASE_MIGRATION_URL?: string;
   REDIS_URL: string;
   REDIS_BULLMQ_URL?: string;
+  /** `<product>:<env tag>:` — namespaces every Redis key (derived; see deriveIdentityVariables). */
+  REDIS_KEY_PREFIX?: string;
   JWT_SECRET: string;
   JWT_PRIVATE_KEY?: string;
   JWT_PUBLIC_KEY?: string;
@@ -49,6 +51,10 @@ export interface EnvironmentVariables {
   ALLOWED_ORIGINS: string;
   /** SPA origin (`frontend.url.<env>`) — the backend builds reset/invite links and the WebAuthn origin from it. */
   FRONTEND_URL?: string;
+  /** Passkey relying-party id — the SPA's hostname (derived from `frontend.url.<env>`). */
+  WEBAUTHN_RP_ID?: string;
+  /** Passkey relying-party name shown in the authenticator prompt — the product name. */
+  WEBAUTHN_RP_NAME?: string;
   RATE_LIMIT_MAX: string;
   RATE_LIMIT_WINDOW_MS: string;
   METRICS_ENABLED?: string;
@@ -85,6 +91,8 @@ export interface EnvironmentVariables {
   RAILWAY_SERVICE_ID?: string;
   RAILWAY_WORKER_SERVICE_ID?: string;
   POSTMAN_WORKSPACE_ID?: string;
+  /** Scalar Registry slug the backend's own docs publish targets (`<base>-<env>`). */
+  SCALAR_SLUG?: string;
 }
 
 export interface GuideStep {

@@ -23,7 +23,10 @@ import { resolve } from 'node:path';
 import * as logger from '@setup/common/logger.js';
 import { resourceStatus } from '@setup/common/interactive-step.js';
 import { setupFetch } from '@setup/common/setup-fetch.js';
-import { resolveEnvironmentApiBaseUrl } from '@setup/envs/env-file-setup.util.js';
+import {
+  resolveEnvironmentApiBaseUrl,
+  scalarSlugForEnvironment,
+} from '@setup/envs/env-file-setup.util.js';
 import { buildEnvironmentVariables } from '@setup/envs/build-env-vars.js';
 import { exportEnvFiles } from '@setup/envs/export-env-files.js';
 import type {
@@ -112,8 +115,7 @@ export async function provision(
   // Namespace is optional — the Scalar CLI auto-resolves the active team's namespace from the
   // token when omitted. Slug is per-environment: `<base>-<env>` (base defaults to the project name).
   const namespaceOverride = secrets.scalar.namespace;
-  const baseSlug = secrets.scalar.slug || config.project.name;
-  const slug = `${baseSlug}-${environmentName}`;
+  const slug = scalarSlugForEnvironment(config, secrets, environmentName);
 
   // Sync .env.<environment> from current state (preserving non-provisioned keys) so the
   // subprocess' dotenv loader doesn't override the injected env with stale empty values.
