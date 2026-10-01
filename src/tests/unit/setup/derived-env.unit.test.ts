@@ -1,10 +1,13 @@
 /**
- * FRONTEND_URL is the SPA origin; `app.frontendUrl` (legacy name) is the API origin.
+ * Config-derived backend env keys.
  *
- * The backend builds password-reset and invite links, the OAuth redirect fallback and the
- * WebAuthn expected origin from FRONTEND_URL. It used to be filled from `app.frontendUrl` — the
- * API origin — and, with no production value, inherited the development one, so production
- * emails linked to localhost:3000.
+ * FRONTEND_URL is the SPA origin; `app.frontendUrl` (legacy name) is the API origin. The backend
+ * builds password-reset and invite links, the OAuth redirect fallback and the WebAuthn expected
+ * origin from FRONTEND_URL. It used to be filled from `app.frontendUrl` — the API origin — and, with
+ * no production value, inherited the development one, so production emails linked to localhost:3000.
+ *
+ * The identity-bound keys (Redis prefix, passkey RP id/name, OAuth redirect URIs, Scalar slug) are
+ * derived the same way, so a rename can never leave the previous product's values behind.
  */
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -12,7 +15,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { setFrontendRoot, setTargetRoot } from '@setup/common/paths.js';
 import type { SetupConfig, SetupSecrets, SetupState } from '@setup/common/types.js';
-import { buildEnvironmentVariables } from '@setup/envs/build-env-vars.js';
+import { buildEnvironmentVariables, deriveIdentityVariables } from '@setup/envs/build-env-vars.js';
 import { buildConfig } from '@setup/infra/init-wizard.js';
 import { downstreamEnvHints } from '@setup/railway/custom-domain-hints.js';
 
@@ -77,9 +80,92 @@ describe('FRONTEND_URL in the backend env', () => {
     expect(frontendUrl('production', config)).toBeUndefined();
   });
 
+  it('carries the identity-derived keys into the full backend env map', () => {
+    const variables = buildEnvironmentVariables(
+      'production',
+      offline(withSpa({ production: 'https://app.acme.test' })),
+      {} as SetupSecrets,
+      state,
+    );
+    expect(variables).toMatchObject({
+      REDIS_KEY_PREFIX: 'acme-be:prod:',
+      WEBAUTHN_RP_ID: 'app.acme.test',
+      WEBAUTHN_RP_NAME: 'Acme',
+    });
+  });
+
   it('never lets production inherit the development SPA origin', () => {
     expect(frontendUrl('production', withSpa({ development: 'http://localhost:5173' }))).toBe(
       undefined,
+    );
+  });
+});
+
+describe('identity-derived backend keys', () => {
+  const secrets = {} as SetupSecrets;
+  const config = (): SetupConfig => ({
+    ...withSpa({ development: 'http://localhost:5173', production: 'https://app.acme.test' }),
+    product: { name: 'acme' },
+  });
+
+  it('derives the Redis prefix, passkey RP, OAuth redirects and Scalar slug from the identity', () => {
+    expect(deriveIdentityVariables('production', config(), secrets)).toEqual({
+      REDIS_KEY_PREFIX: 'acme:prod:',
+      WEBAUTHN_RP_NAME: 'Acme',
+      WEBAUTHN_RP_ID: 'app.acme.test',
+      OAUTH_GITHUB_REDIRECT_URI: 'https://app.acme.test/callback/github',
+      OAUTH_GOOGLE_REDIRECT_URI: 'https://app.acme.test/callback/google',
+      SCALAR_SLUG: 'acme-be-production',
+    });
+    expect(deriveIdentityVariables('development', config(), secrets)).toMatchObject({
+      REDIS_KEY_PREFIX: 'acme:dev:',
+      WEBAUTHN_RP_ID: 'localhost',
+      OAUTH_GITHUB_REDIRECT_URI: 'http://localhost:5173/callback/github',
+      SCALAR_SLUG: 'acme-be-development',
+    });
+  });
+
+  it('tags any other environment with its own name', () => {
+    expect(deriveIdentityVariables('staging', config(), secrets).REDIS_KEY_PREFIX).toBe(
+      'acme:staging:',
+    );
+  });
+
+  it('omits what it cannot derive instead of guessing', () => {
+    const noProductionSpa: SetupConfig = {
+      ...config(),
+      frontend: { name: 'acme-fe', url: { development: 'http://localhost:5173' } },
+    };
+    const derived = deriveIdentityVariables('production', noProductionSpa, secrets);
+    expect(derived).not.toHaveProperty('WEBAUTHN_RP_ID');
+    expect(derived).not.toHaveProperty('OAUTH_GITHUB_REDIRECT_URI');
+  });
+
+  it('writes redirect URIs and the Scalar slug only for enabled providers', () => {
+    const base = offline(config());
+    const githubOnly: SetupConfig = {
+      ...base,
+      providers: {
+        ...base.providers,
+        oauth: { google: { enabled: false }, github: { enabled: true } },
+      },
+    };
+    const derived = deriveIdentityVariables('production', githubOnly, secrets);
+    expect(derived.OAUTH_GITHUB_REDIRECT_URI).toBe('https://app.acme.test/callback/github');
+    expect(derived).not.toHaveProperty('OAUTH_GOOGLE_REDIRECT_URI');
+    expect(derived).not.toHaveProperty('SCALAR_SLUG');
+  });
+
+  it('honours a SCALAR_SLUG override from .setup-credentials', () => {
+    const override = { scalar: { slug: 'acme-api' } } as unknown as SetupSecrets;
+    expect(deriveIdentityVariables('production', config(), override).SCALAR_SLUG).toBe(
+      'acme-api-production',
+    );
+  });
+
+  it('never writes OTEL_SERVICE_NAME — the backend names the API and the worker itself', () => {
+    expect(deriveIdentityVariables('production', config(), secrets)).not.toHaveProperty(
+      'OTEL_SERVICE_NAME',
     );
   });
 });

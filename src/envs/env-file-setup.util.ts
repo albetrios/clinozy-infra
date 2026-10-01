@@ -12,7 +12,7 @@ import {
   questionHidden,
 } from '@setup/common/prompts.js';
 import { isSecretFilled } from '@setup/common/secrets.js';
-import type { SetupConfig, SetupState } from '@setup/common/types.js';
+import type { SetupConfig, SetupSecrets, SetupState } from '@setup/common/types.js';
 import { readEnvFileValue, upsertEnvFileValue } from './read-env-file.js';
 
 /** Default environment from config (`isDefault` flag, else first listed). */
@@ -96,6 +96,19 @@ export function oauthCallbackUrl(
  */
 export function productName(config: SetupConfig): string {
   return config.product?.name ?? config.project.name;
+}
+
+/**
+ * Scalar Registry slug for an env: `<base>-<env>`, where base is the `SCALAR_SLUG` override in
+ * `.setup-credentials` or the project name. One definition for the publisher and the env file, so
+ * the backend's own docs workflow publishes to the same doc setup created.
+ */
+export function scalarSlugForEnvironment(
+  config: SetupConfig,
+  secrets: SetupSecrets,
+  environmentName: string,
+): string {
+  return `${secrets.scalar?.slug || config.project.name}-${environmentName}`;
 }
 
 /** Shared-resource name for an env: `<product>-<env>` (e.g. `clinozy-development`, `clinozy-production`). */
