@@ -13,6 +13,7 @@ import * as logger from '@setup/common/logger.js';
 import { isSecretFilled } from '@setup/common/secrets.js';
 import { setupFetch } from '@setup/common/setup-fetch.js';
 import { resourceStatus } from '@setup/common/interactive-step.js';
+import { plainDnsType, requireDnsRecord } from '@setup/common/dns-requirements.js';
 import { apiHostForEnvironment } from '@setup/envs/env-file-setup.util.js';
 import { ensureCustomDomain, ensureServiceDomain } from '@setup/railway/railway-api.js';
 import type {
@@ -572,6 +573,17 @@ export async function provision(
           logger.success(
             `  Custom API domain for "${environmentName}" ${attached ? 'attached' : 'already attached'}: https://${customHost}${customDomain.status.verified ? '' : ' (waiting for DNS)'}`,
           );
+          for (const record of customDomain.status.dnsRecords) {
+            const type = plainDnsType(record.recordType);
+            if (type) {
+              requireDnsRecord({
+                provider: 'Railway',
+                type,
+                name: record.fqdn,
+                value: record.requiredValue,
+              });
+            }
+          }
           if (!customDomain.status.verified) {
             for (const record of customDomain.status.dnsRecords) {
               logger.info(`    DNS: ${record.recordType} ${record.fqdn} → ${record.requiredValue}`);

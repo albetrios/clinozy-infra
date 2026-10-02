@@ -1,5 +1,6 @@
 import { createInterface } from 'node:readline';
 import * as logger from '@setup/common/logger.js';
+import { runNextSteps } from './next-steps.js';
 import { isAssumeYes } from '@setup/common/prompts.js';
 import { loadConfig, getEnvironmentNames, getConfigPath } from '@setup/common/config.js';
 import {
@@ -522,6 +523,9 @@ export async function runProvision(options: ProvisionOptions = {}): Promise<void
   } else {
     logger.success('Setup completed successfully! All resources provisioned.');
   }
+
+  // What setup cannot do itself, one step at a time, with live status.
+  await runNextSteps(context.config, context.secrets);
 
   const summaryItems: Array<{ label: string; value: string | string[] }> = [];
 

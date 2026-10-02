@@ -39,6 +39,8 @@ export interface EnvironmentVariables {
   LOG_LEVEL: string;
   DATABASE_URL: string;
   DATABASE_MIGRATION_URL?: string;
+  /** RLS-subject maintenance pool (`<project>_maintenance`) — set once the backend's migrations ran. */
+  DATABASE_MAINTENANCE_URL?: string;
   REDIS_URL: string;
   REDIS_BULLMQ_URL?: string;
   /** `<product>:<env tag>:` — namespaces every Redis key (derived; see deriveIdentityVariables). */

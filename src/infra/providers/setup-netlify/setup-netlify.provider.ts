@@ -13,6 +13,7 @@
  * SECRETS: NETLIFY_AUTH_TOKEN comes from `.setup-credentials` or the Netlify CLI's saved login, is
  * never printed, and is written only to the frontend env (see frontend-env-keys.ts).
  */
+import { requireDnsRecord } from '@setup/common/dns-requirements.js';
 import * as logger from '@setup/common/logger.js';
 import { resourceStatus } from '@setup/common/interactive-step.js';
 import { SetupError } from '@setup/common/setup-error.js';
@@ -178,6 +179,12 @@ export async function provision(
     `  Netlify site "${site.name}" — ${created ? 'created' : 'adopted'} (serves every environment)`,
   );
   if (target.customDomain) {
+    requireDnsRecord({
+      provider: 'Netlify',
+      type: 'CNAME',
+      name: target.customDomain,
+      value: `${site.name}.netlify.app`,
+    });
     logger.info(
       `    Custom domain ${target.customDomain} — DNS: CNAME ${target.customDomain} → ${site.name}.netlify.app`,
     );

@@ -9,12 +9,18 @@
  * SECRETS: written to `.env.<environment>` only (via build-env-vars), never printed to the
  * console; setup secret files are gitignored and unreadable by the agent (deny-read guard). See SETUP_INFRA_PROVIDER_TEMPLATE.md.
  */
+import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
+import { mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import postgres from 'postgres';
 import * as logger from '@setup/common/logger.js';
-import { setupFetch } from '@setup/common/setup-fetch.js';
+import { redactSecrets, setupFetch } from '@setup/common/setup-fetch.js';
 import { resourceStatus } from '@setup/common/interactive-step.js';
 import { isSecretFilled } from '@setup/common/secrets.js';
+import { targetRoot } from '@setup/common/paths.js';
+import { readEnvFileValue } from '@setup/envs/read-env-file.js';
 import type {
   SetupConfig,
   SetupSecrets,
@@ -385,6 +391,8 @@ interface NeonBranchEntry {
    * is inlined into `databaseUrl` and pushed to Railway / GitHub Environments.
    */
   serviceRolePassword?: string;
+  /** Pooled URL as `<project>_maintenance` (RLS-subject maintenance pool) once the role exists. */
+  databaseMaintenanceUrl?: string;
 }
 
 interface GetConnectionUriOptions {
@@ -412,17 +420,160 @@ async function getConnectionUri(options: GetConnectionUriOptions): Promise<strin
 }
 
 interface EnsureRuntimeRoleViaSqlOptions {
+  /** The backend's runtime group role (`<project>_app`) the login role joins. */
+  appRole: string;
   migrationUrl: string;
   roleName: string;
   rolePassword: string;
   environmentName: string;
 }
 
+/**
+ * The backend's group roles, created NOLOGIN by its migrations and named after the project
+ * (`<project_name>_<purpose>`, e.g. `clinozy_be_app`). Hosted environments use three of them —
+ * see the backend's docs/deployment/runbooks/maintenance-database-role.md:
+ *   - `app`         runtime DML; reached through the `<env>_app_login` member  → DATABASE_URL
+ *   - `maintenance` RLS-subject maintenance pool, gets LOGIN                    → DATABASE_MAINTENANCE_URL
+ *   - `migrator`    day-to-day migrations, gets LOGIN CREATEROLE (direct host)  → DATABASE_MIGRATION_URL
+ * `owner` is a group only, and `operator` (DATABASE_OPERATOR_URL) is local/CI-only — never hosted.
+ */
+type BackendRolePurpose = 'app' | 'maintenance' | 'migrator';
+
+export function backendRoleName(config: SetupConfig, purpose: BackendRolePurpose): string {
+  return `${config.project.name.replace(/-/g, '_')}_${purpose}`;
+}
+
+/** Which of `names` exist on the branch. */
+async function presentRoles(migrationUrl: string, names: readonly string[]): Promise<Set<string>> {
+  const sql = postgres(migrationUrl, { max: 1, prepare: false, onnotice: logNeonNotice });
+  try {
+    const rows = await sql<{ rolname: string }[]>`
+      SELECT rolname FROM pg_roles WHERE rolname IN ${sql([...names])}
+    `;
+    return new Set(rows.map((row) => row.rolname));
+  } finally {
+    await sql.end({ timeout: 5 });
+  }
+}
+
+/**
+ * The password already in `.env.<environment>` for `key` when that URL logs in as `user` — reused
+ * so re-runs keep every connection string stable instead of rotating it (state is ephemeral).
+ */
+export function passwordFromEnvUrl(value: string | undefined, user: string): string | undefined {
+  if (!value) return undefined;
+  try {
+    const url = new URL(value);
+    if (decodeURIComponent(url.username) !== user) return undefined;
+    const password = decodeURIComponent(url.password);
+    return ROLE_PASSWORD_PATTERN.test(password) ? password : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The direct (non-pooler) URL for `roleName`, from the owner's direct migration URL. */
+function buildDirectDatabaseUrl(options: {
+  migrationUrl: string;
+  roleName: string;
+  rolePassword: string;
+}): string {
+  const direct = new URL(options.migrationUrl);
+  direct.username = options.roleName;
+  direct.password = options.rolePassword;
+  return direct.toString();
+}
+
+/**
+ * Give one of the backend's NOLOGIN group roles a login (runbook: `ALTER ROLE … LOGIN PASSWORD`).
+ * Fails closed when an RLS-subject role ended up superuser or BYPASSRLS.
+ */
+async function enableGroupRoleLogin(options: {
+  migrationUrl: string;
+  roleName: string;
+  rolePassword: string;
+  createRole: boolean;
+  rlsSubject: boolean;
+  environmentName: string;
+}): Promise<void> {
+  const { migrationUrl, roleName, rolePassword, environmentName } = options;
+  if (!POSTGRES_IDENTIFIER_PATTERN.test(roleName)) {
+    throw new Error(`Refusing to manage unsafe role identifier: ${roleName}`);
+  }
+  assertRolePasswordSafeForSql(rolePassword);
+  const sql = postgres(migrationUrl, { max: 1, prepare: false, onnotice: logNeonNotice });
+  try {
+    await sql.unsafe(
+      `ALTER ROLE ${roleName} WITH LOGIN ${options.createRole ? 'CREATEROLE ' : ''}PASSWORD '${rolePassword}'`,
+    );
+    await sql.unsafe(`GRANT CONNECT ON DATABASE ${NEON_DEFAULT_DATABASE} TO ${roleName}`);
+    const [attributes] = await sql<{ rolsuper: boolean; rolbypassrls: boolean }[]>`
+      SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = ${roleName}
+    `;
+    if (attributes?.rolsuper || (options.rlsSubject && attributes?.rolbypassrls)) {
+      throw new Error(
+        `Role "${roleName}" on "${environmentName}" has rolsuper=${attributes.rolsuper} rolbypassrls=${attributes.rolbypassrls} — it must stay subject to row-level security.`,
+      );
+    }
+  } finally {
+    await sql.end({ timeout: 5 });
+  }
+}
+
+/**
+ * First `db:migrate` on a fresh database, as the provider's owner — the backend runbook's
+ * "bootstrap migrate" (its roles do not exist until migrations create them). Runs the target's own
+ * `db:migrate` command from an EMPTY scratch directory that only links `migrations/`: the target's
+ * env loader reads `.env.<NODE_ENV>` and then `.env.local` (override: true) from the working
+ * directory, so running in the repo would silently swap this URL for a developer's local database.
+ */
+function runBootstrapMigrations(ownerUrl: string, environmentName: string): void {
+  const root = targetRoot();
+  const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8')) as {
+    scripts?: Record<string, string>;
+  };
+  const command = /^tsx\s+(\S+\.ts)$/.exec(manifest.scripts?.['db:migrate']?.trim() ?? '');
+  if (!command?.[1]) {
+    throw new Error(
+      'the target\'s "db:migrate" script is not `tsx <file>` — run it once yourself with DATABASE_MIGRATION_URL set to the owner URL',
+    );
+  }
+  const runDirectory = mkdtempSync(join(tmpdir(), 'setup-bootstrap-migrate-'));
+  try {
+    symlinkSync(join(root, 'migrations'), join(runDirectory, 'migrations'));
+    const environment: NodeJS.ProcessEnv = { ...process.env };
+    for (const key of Object.keys(environment)) {
+      if (key.startsWith('DATABASE_')) delete environment[key];
+    }
+    execFileSync(
+      join(root, 'node_modules', '.bin', 'tsx'),
+      ['--tsconfig', join(root, 'tsconfig.json'), join(root, command[1])],
+      {
+        cwd: runDirectory,
+        env: { ...environment, NODE_ENV: environmentName, DATABASE_MIGRATION_URL: ownerUrl },
+        stdio: 'pipe',
+        encoding: 'utf-8',
+        timeout: 10 * 60_000,
+      },
+    );
+  } catch (error) {
+    const detail = error as { stderr?: string; stdout?: string; message?: string };
+    const output = `${detail.stderr ?? ''}${detail.stdout ?? ''}`
+      .trim()
+      .split('\n')
+      .slice(-6)
+      .join(' | ');
+    throw new Error(redactSecrets(output || detail.message || String(error)));
+  } finally {
+    rmSync(runDirectory, { recursive: true, force: true });
+  }
+}
+
 interface EnsureRuntimeRoleViaSqlResult {
   /** True when the role didn't exist before this call. False if it already existed. */
   roleCreated: boolean;
-  /** True when `GRANT clinozy_be_app TO <roleName>` was executed (skipped if `clinozy_be_app` is absent). */
-  clinozyBeAppMembershipGranted: boolean;
+  /** True when `GRANT <appRole> TO <roleName>` was executed (skipped when the app role is absent). */
+  appMembershipGranted: boolean;
 }
 
 /**
@@ -449,9 +600,9 @@ interface EnsureRuntimeRoleViaSqlResult {
 async function ensureRuntimeRoleViaSql(
   options: EnsureRuntimeRoleViaSqlOptions,
 ): Promise<EnsureRuntimeRoleViaSqlResult> {
-  const { migrationUrl, roleName, rolePassword, environmentName } = options;
-  if (!POSTGRES_IDENTIFIER_PATTERN.test(roleName)) {
-    throw new Error(`Refusing to manage unsafe role identifier: ${roleName}`);
+  const { migrationUrl, roleName, rolePassword, environmentName, appRole } = options;
+  if (!POSTGRES_IDENTIFIER_PATTERN.test(roleName) || !POSTGRES_IDENTIFIER_PATTERN.test(appRole)) {
+    throw new Error(`Refusing to manage unsafe role identifier: ${roleName} / ${appRole}`);
   }
   assertRolePasswordSafeForSql(rolePassword);
 
@@ -486,19 +637,19 @@ async function ensureRuntimeRoleViaSql(
     await sql.unsafe(`GRANT CONNECT ON DATABASE ${NEON_DEFAULT_DATABASE} TO ${roleName}`);
 
     const appRoleRows = await sql<{ rolname: string }[]>`
-      SELECT rolname FROM pg_roles WHERE rolname = 'clinozy_be_app'
+      SELECT rolname FROM pg_roles WHERE rolname = ${appRole}
     `;
-    let clinozyBeAppMembershipGranted = false;
+    let appMembershipGranted = false;
     if (appRoleRows.length > 0) {
-      await sql.unsafe(`GRANT clinozy_be_app TO ${roleName}`);
-      clinozyBeAppMembershipGranted = true;
+      await sql.unsafe(`GRANT ${appRole} TO ${roleName}`);
+      appMembershipGranted = true;
     } else {
       logger.warn(
-        `  clinozy_be_app role not present on "${environmentName}" yet — run \`pnpm db:migrate\` and re-run \`pnpm setup:infra\` to grant runtime privileges via membership.`,
+        `  ${appRole} role not present on "${environmentName}" yet — the backend's migrations create it; re-run \`pnpm setup:infra\` after they have run.`,
       );
     }
 
-    return { roleCreated: !roleAlreadyExists, clinozyBeAppMembershipGranted };
+    return { roleCreated: !roleAlreadyExists, appMembershipGranted };
   } finally {
     await sql.end({ timeout: 5 });
   }
@@ -563,6 +714,7 @@ async function grantRuntimePrivileges(options: GrantRuntimePrivilegesOptions): P
 }
 
 interface EnsureBranchRuntimeRoleOptions {
+  config: SetupConfig;
   apiKey: string;
   projectId: string;
   environmentName: string;
@@ -582,10 +734,15 @@ interface EnsureBranchRuntimeRoleOptions {
 async function ensureBranchRuntimeRole(
   options: EnsureBranchRuntimeRoleOptions,
 ): Promise<NeonBranchEntry> {
-  const { apiKey, projectId, environmentName, entry } = options;
+  const { config, apiKey, projectId, environmentName, entry } = options;
   const serviceRoleName = getServiceRoleName(environmentName);
   const legacyRoleName = getLegacyServiceRoleName(environmentName);
+  const appRole = backendRoleName(config, 'app');
+  const maintenanceRole = backendRoleName(config, 'maintenance');
+  const migratorRole = backendRoleName(config, 'migrator');
 
+  // The owner's direct URL: used for every SQL step here, and as DATABASE_MIGRATION_URL until the
+  // migrator login exists (the runbook's bootstrap path).
   const databaseMigrationUrl = await getConnectionUri({
     apiKey,
     projectId,
@@ -594,32 +751,49 @@ async function ensureBranchRuntimeRole(
     pooled: false,
   });
 
-  // Reuse the password from state when the role and password are already recorded — that
-  // keeps re-runs of `pnpm setup:infra` idempotent across env files, GitHub Environments,
-  // and Railway. Generate a fresh password only when we have nothing to reuse.
+  // Fresh database: the backend's roles come from its migrations, so run them once (bootstrap).
+  let roles = await presentRoles(databaseMigrationUrl, [appRole, maintenanceRole, migratorRole]);
+  if (!roles.has(appRole)) {
+    logger.info(
+      `  ${appRole} not present on "${environmentName}" — fresh database; running the backend's migrations once as ${NEON_OWNER_ROLE} (bootstrap)...`,
+    );
+    try {
+      runBootstrapMigrations(databaseMigrationUrl, environmentName);
+      logger.success(`  Bootstrap migrations applied on "${environmentName}"`);
+      roles = await presentRoles(databaseMigrationUrl, [appRole, maintenanceRole, migratorRole]);
+    } catch (error) {
+      logger.warn(
+        `  Bootstrap migrations failed on "${environmentName}": ${error instanceof Error ? error.message : String(error)} — the first deploy will run them; re-run setup:infra afterwards.`,
+      );
+    }
+  }
+
+  // Reuse the password already in .env.<environment> (or recorded this run) so connection strings
+  // stay stable across runs; generate one only when there is nothing to reuse.
   const rolePassword =
-    entry.serviceRoleName === serviceRoleName && entry.serviceRolePassword
-      ? entry.serviceRolePassword
-      : generateRolePassword();
+    (entry.serviceRoleName === serviceRoleName ? entry.serviceRolePassword : undefined) ??
+    passwordFromEnvUrl(readEnvFileValue(environmentName, 'DATABASE_URL'), serviceRoleName) ??
+    generateRolePassword();
 
   const ensureResult = await ensureRuntimeRoleViaSql({
     migrationUrl: databaseMigrationUrl,
     roleName: serviceRoleName,
     rolePassword,
     environmentName,
+    appRole,
   });
   logger.success(
     ensureResult.roleCreated
       ? `  Runtime role "${serviceRoleName}" created via SQL on Neon branch ${entry.branchId}`
-      : `  Runtime role "${serviceRoleName}" already exists on Neon branch ${entry.branchId} (password refreshed)`,
+      : `  Runtime role "${serviceRoleName}" already exists on Neon branch ${entry.branchId}`,
   );
-  if (ensureResult.clinozyBeAppMembershipGranted) {
-    logger.success(`  Granted clinozy_be_app membership to "${serviceRoleName}" (inherits DML)`);
+  if (ensureResult.appMembershipGranted) {
+    logger.success(`  Granted ${appRole} membership to "${serviceRoleName}" (inherits DML)`);
   }
 
-  // Fall back to explicit schema grants when `clinozy_be_app` is not yet defined (e.g. first
-  // run before migrations). Once migrations land, subsequent runs use the inherited grants.
-  if (!ensureResult.clinozyBeAppMembershipGranted) {
+  // Fall back to explicit schema grants when the app role is not yet defined (e.g. first run
+  // before migrations). Once migrations land, subsequent runs use the inherited grants.
+  if (!ensureResult.appMembershipGranted) {
     const grantedSchemas = await grantRuntimePrivileges({
       migrationUrl: databaseMigrationUrl,
       roleName: serviceRoleName,
@@ -627,7 +801,7 @@ async function ensureBranchRuntimeRole(
     });
     if (grantedSchemas.length > 0) {
       logger.success(
-        `  Granted runtime privileges directly to "${serviceRoleName}" on schemas: ${grantedSchemas.join(', ')} (no clinozy_be_app yet)`,
+        `  Granted runtime privileges directly to "${serviceRoleName}" on schemas: ${grantedSchemas.join(', ')} (no ${appRole} yet)`,
       );
     }
   }
@@ -647,10 +821,59 @@ async function ensureBranchRuntimeRole(
     rolePassword,
   });
 
+  // The backend's other hosted logins, once its migrations have created the roles.
+  let databaseMaintenanceUrl: string | undefined;
+  if (roles.has(maintenanceRole)) {
+    const password =
+      passwordFromEnvUrl(
+        readEnvFileValue(environmentName, 'DATABASE_MAINTENANCE_URL'),
+        maintenanceRole,
+      ) ?? generateRolePassword();
+    await enableGroupRoleLogin({
+      migrationUrl: databaseMigrationUrl,
+      roleName: maintenanceRole,
+      rolePassword: password,
+      createRole: false,
+      rlsSubject: true,
+      environmentName,
+    });
+    databaseMaintenanceUrl = buildPooledDatabaseUrl({
+      migrationUrl: databaseMigrationUrl,
+      roleName: maintenanceRole,
+      rolePassword: password,
+    });
+    logger.success(`  Maintenance login "${maintenanceRole}" ready → DATABASE_MAINTENANCE_URL`);
+  }
+  let migrationUrl = databaseMigrationUrl;
+  if (roles.has(migratorRole)) {
+    const password =
+      passwordFromEnvUrl(
+        readEnvFileValue(environmentName, 'DATABASE_MIGRATION_URL'),
+        migratorRole,
+      ) ?? generateRolePassword();
+    await enableGroupRoleLogin({
+      migrationUrl: databaseMigrationUrl,
+      roleName: migratorRole,
+      rolePassword: password,
+      createRole: true,
+      rlsSubject: false,
+      environmentName,
+    });
+    migrationUrl = buildDirectDatabaseUrl({
+      migrationUrl: databaseMigrationUrl,
+      roleName: migratorRole,
+      rolePassword: password,
+    });
+    logger.success(
+      `  Migrator login "${migratorRole}" ready → DATABASE_MIGRATION_URL (direct host)`,
+    );
+  }
+
   return {
     ...entry,
     databaseUrl,
-    databaseMigrationUrl,
+    databaseMigrationUrl: migrationUrl,
+    ...(databaseMaintenanceUrl ? { databaseMaintenanceUrl } : {}),
     serviceRoleName,
     serviceRolePassword: rolePassword,
   };
@@ -865,6 +1088,7 @@ export async function provision(
         );
       }
       const updated = await ensureBranchRuntimeRole({
+        config,
         apiKey,
         projectId: neonProjectId,
         environmentName,
@@ -1066,6 +1290,9 @@ export const setupNeonProvider: InfraProvider = {
     // re-run provisioning to capture it, rather than write a knowingly-broken migration URL.
     if (branch.databaseMigrationUrl) {
       variables.DATABASE_MIGRATION_URL = branch.databaseMigrationUrl;
+    }
+    if (branch.databaseMaintenanceUrl) {
+      variables.DATABASE_MAINTENANCE_URL = branch.databaseMaintenanceUrl;
     }
     return variables;
   },

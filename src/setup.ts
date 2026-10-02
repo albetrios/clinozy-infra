@@ -10,6 +10,8 @@ import {
 } from './infra/orchestrator.js';
 import { runInitWizard } from './infra/init-wizard.js';
 import { runDoctor } from './infra/doctor.js';
+import { runNextSteps } from './infra/next-steps.js';
+import { loadConfig } from './common/config.js';
 import { runExample } from './infra/example.js';
 import { runGuide } from './infra/setup-guide/index.js';
 import { runVault } from './infra/vault.js';
@@ -17,7 +19,7 @@ import { runPlan } from './infra/plan.js';
 import { runInspect } from './infra/inspect.js';
 import { runFrontend, runOutput } from './infra/output.js';
 import { runExportEnv, runExportFrontendEnv } from './envs/export-env-files.js';
-import { loadEnvSetupIntoProcess } from './common/secrets.js';
+import { loadEnvSetupIntoProcess, loadSecrets } from './common/secrets.js';
 import { setAssumeYes, setForce } from './common/prompts.js';
 import { omitUndefined } from './common/object.js';
 import { reportSetupError } from './common/setup-error.js';
@@ -57,6 +59,7 @@ function getCommand(): string {
     return 'delete';
   }
   if (args.includes('--doctor')) return 'doctor';
+  if (args.includes('--next')) return 'next';
   if (args.includes('--example')) return 'example';
   if (args.includes('--guide')) return 'guide';
   if (args.includes('--vault')) return 'vault';
@@ -195,6 +198,11 @@ async function main(): Promise<void> {
       case 'doctor':
         runDoctor();
         break;
+      case 'next': {
+        const config = loadConfig();
+        await runNextSteps(config, loadSecrets(config));
+        break;
+      }
       case 'example':
         runExample(omitUndefined({ force: args.includes('--force') || undefined }));
         break;

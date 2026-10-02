@@ -4,6 +4,7 @@
  * Validates the Resend API key (no resource is created — Resend exposes a single org-level key)
  * and contributes EMAIL_FROM_* (config-derived) + RESEND_API_KEY (once present) to the env files.
  */
+import { plainDnsType, requireDnsRecord } from '@setup/common/dns-requirements.js';
 import * as logger from '@setup/common/logger.js';
 import { resolveResendFromAddress, resolveResendFromName } from '@setup/common/resend-from.js';
 import { isSecretFilled } from '@setup/common/secrets.js';
@@ -48,6 +49,18 @@ export async function ensureResendSenderDomain(
     : ((await (
         await call('/domains', { method: 'POST', body: JSON.stringify({ name: domain }) })
       ).json()) as ResendDomain);
+  for (const record of detail.records ?? []) {
+    const type = plainDnsType(record.type);
+    if (!type) continue;
+    const name = !record.name || record.name === '@' ? domain : `${record.name}.${domain}`;
+    requireDnsRecord({
+      provider: 'Resend',
+      type,
+      name,
+      value: record.value,
+      ...(record.priority ? { priority: record.priority } : {}),
+    });
+  }
   if (detail.status !== 'verified') {
     for (const record of detail.records ?? []) {
       logger.info(

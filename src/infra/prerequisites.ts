@@ -93,8 +93,8 @@ export function satisfiesMinimumNode(range: string, version: string): boolean {
   return true;
 }
 
-/** Providers that run the backend repo's own pnpm scripts, which enforce its `engines.node`. */
-const TARGET_SCRIPT_PROVIDERS = ['postman', 'scalar'];
+/** Providers that run the backend repo's own scripts (docs; bootstrap migrations), which enforce its `engines.node`. */
+const TARGET_SCRIPT_PROVIDERS = ['postman', 'scalar', 'neon'];
 
 /**
  * The backend's `pnpm docs:*` scripts refuse a Node older than its `engines.node`, which failed

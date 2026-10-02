@@ -14,6 +14,8 @@ const neonBranchStateSchema = z.object({
    * Neon step and create the new `<env>_app_login` role.
    */
   serviceRolePassword: z.string().optional(),
+  /** Pooled URL as the backend's maintenance role, once its migrations created it. */
+  databaseMaintenanceUrl: z.string().optional(),
 });
 
 const redisDatabaseStateSchema = z.object({

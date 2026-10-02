@@ -32,7 +32,12 @@ export const neonPreset: ManagedPreset = {
   dashboard: { url: 'https://console.neon.tech/app/settings/api-keys', label: 'Neon → API keys' },
   outputs: [
     { key: 'DATABASE_URL', description: 'Pooled Postgres connection string' },
-    { key: 'DATABASE_MIGRATION_URL', description: 'Direct (unpooled) connection for migrations' },
+    {
+      key: 'DATABASE_MIGRATION_URL',
+      description:
+        'Direct connection for migrations — the migrator login, or the owner until it exists',
+    },
+    { key: 'DATABASE_MAINTENANCE_URL', description: 'Pooled connection as the maintenance role' },
     {
       key: 'MONTHLY_DATABASE_RESTORE_DRILL_NEON_API_KEY',
       description: 'Neon API key for the scheduled restore drill (= NEON_API_KEY)',
