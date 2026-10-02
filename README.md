@@ -56,8 +56,8 @@ Every credential and what gets created: [docs/SETUP_INFRA_PREREQUISITES.md](docs
 | 2 | Do what's left by hand — DNS, sign-in callback URLs, Stripe webhooks — until each is ✓ | `pnpm setup:infra:next` |
 | 3 | Push each app's env files to its GitHub Environments | in each app: `pnpm github:sync` |
 | 4 | Attestations switch + re-run the failed post-merge CI on `main` → development deploys | `pnpm setup:infra:deploy` |
-| 5 | Merge each app's release-please Release PR (`chore(main): release X.Y.Z`) → release tag | on GitHub (squash) |
-| 6 | Deploy each app's latest release to production, from `main` | `pnpm setup:infra:deploy --production` |
+| 5 | Merge each app's release-please Release PR (`chore(main): release X.Y.Z`) → the published release deploys production (`release-deploy.yml`, pinned to the tag) | on GitHub (squash) |
+| 6 | Only if a release deploy failed, or to roll forward/back to a tag: re-deploy it from `main` | `pnpm setup:infra:deploy --production` |
 
 What `pnpm setup:infra:deploy` does, per app — as your own `gh auth login` (an owner of both app repos), not setup's narrower `GITHUB_TOKEN`:
 
@@ -65,10 +65,10 @@ What `pnpm setup:infra:deploy` does, per app — as your own `gh auth login` (an
    Cloud. Where the plan can't, it sets the repository variable `ARTIFACT_ATTESTATIONS=disabled` (the
    apps' attest steps then skip with a warning); where it can, it removes the variable.
 2. **Post-merge CI.** Re-runs the failed jobs of the latest `post-merge-ci.yml` run on `main`.
-3. **Production** (`--production` only). Runs `release-deploy.yml` from `main` with the app's latest
-   release tag, after a `y/N` confirmation (`--yes` skips it). Production accepts protected branches
-   only, so publishing a release doesn't deploy by itself. One app or an older tag:
-   `--app backend|frontend` and `--tag vX.Y.Z`.
+3. **Production** (`--production` only). Re-deploys the app's latest release by running
+   `release-deploy.yml` from `main` with its tag, after a `y/N` confirmation (`--yes` skips it).
+   Publishing a release already deploys production by itself (its own `release-deploy.yml` run), so
+   this is for a failed release deploy or another tag: `--app backend|frontend` and `--tag vX.Y.Z`.
 
 By hand, the same steps for one app:
 

@@ -8,9 +8,9 @@
  *      skip with a warning), and removes it where the plan can.
  *   2. Post-merge CI. Re-runs the failed jobs of the latest post-merge run on `main` — that run
  *      deploys the development environment.
- *   3. Production (`--production` only). Runs each app's release-deploy.yml FROM `main` with its
- *      latest release tag: the production environment accepts protected branches only, so a
- *      published release does not deploy by itself.
+ *   3. Production (`--production` only). Re-deploys each app's latest release (or `--tag`) by
+ *      running its release-deploy.yml from `main`. Publishing a release already deploys production
+ *      by itself; this is for a failed release deploy or another tag.
  *
  * Runs as the operator's own `gh auth login`, not setup's GITHUB_TOKEN: shipping sets repository
  * variables, re-runs and starts workflows and reads the organization's plan — more than that
@@ -151,7 +151,7 @@ async function confirmProduction(prompt: string): Promise<boolean> {
   }
 }
 
-/** Step 3 for one app: run release-deploy.yml from main with the release tag. */
+/** Step 3 for one app: re-deploy a release by running release-deploy.yml from main with its tag. */
 export async function deployProduction(
   github: DeployGithub,
   app: App,
@@ -301,7 +301,7 @@ export async function runDeploy(
   logger.stepHeader(3, 3, 'Production');
   if (!options.production) {
     logger.infoRaw(
-      `– skipped. After merging each app's Release PR: pnpm setup:infra:deploy --production`,
+      '– skipped. Publishing a release deploys production by itself; to re-deploy one: pnpm setup:infra:deploy --production',
     );
   } else {
     for (const app of apps) logger.infoRaw(await deployProduction(github, app, options.tag));
