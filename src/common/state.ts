@@ -136,6 +136,14 @@ export const setupStateSchema = z.object({
       secrets: z.array(z.string()),
     })
     .optional(),
+  /** The frontend's Netlify site — one site serves every environment (aliases + --prod). */
+  netlify: z
+    .object({
+      siteId: z.string(),
+      siteName: z.string(),
+      url: z.string(),
+    })
+    .optional(),
   postman: z
     .object({
       workspaceId: z.string().optional(),

@@ -255,6 +255,14 @@ async function provisionGithubApp(context: InfraProviderContext): Promise<boolea
 
 export const setupGithubAppWithOauthProvider: InfraProvider = {
   key: 'github-app-with-oauth',
+  // The redirect URI is a pure function of the SPA origin, so it is derived on every run instead of
+  // keeping a pasted value that goes stale on a rename (client id/secret stay user-entered).
+  toEnvironmentVariables: ({ config }, environmentName) => {
+    const redirectUri = config.providers.oauth.github.enabled
+      ? githubCallbackUrl(config, environmentName)
+      : '';
+    return redirectUri ? { OAUTH_GITHUB_REDIRECT_URI: redirectUri } : {};
+  },
   name: 'GitHub App (sign-in)',
   isEnabled: ({ config }) => config.providers.oauth.github.enabled,
   disabledReason: () => 'GitHub OAuth disabled in setup.config.json',

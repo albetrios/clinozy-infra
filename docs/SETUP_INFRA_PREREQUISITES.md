@@ -23,6 +23,7 @@ Authoritative source: `pnpm setup:infra:preview` and `tooling/setup/common/secre
 | **Postman** | Account API key | `POSTMAN_API_KEY` | https://go.postman.co/settings/me/api-keys |
 | **Scalar** | Account API key | `SCALAR_API_KEY` (optional `SCALAR_NAMESPACE` / `SCALAR_SLUG`) | https://dashboard.scalar.com |
 | **PostHog** | Personal API key | `POSTHOG_PERSONAL_API_KEY` (optional `POSTHOG_PROJECT_ID` / `POSTHOG_PROJECT_API_KEY`) | https://us.posthog.com/settings/user-api-keys |
+| **Netlify** (frontend site) | Personal access token — or nothing when `netlify login` was run on this machine | `NETLIFY_AUTH_TOKEN` | https://app.netlify.com/user/applications#personal-access-tokens |
 | **JWT secrets** | — nothing — | — | n/a (generated locally) |
 
 Cloudflare Turnstile is **provisioned** from `CLOUDFLARE_*`: setup creates one widget per environment and writes `CAPTCHA_SITE_KEY` / `CAPTCHA_SECRET` into each `.env.<environment>`. Postman uses `POSTMAN_API_KEY` to create one workspace (named after the project) and a **collection per environment** (`<project>-<env>`, each with that environment's API base URL baked in), then writes `POSTMAN_WORKSPACE_ID` back into each `.env.<environment>` (output). Scalar uses `SCALAR_API_KEY` to publish a Scalar Registry doc **per environment** (slug `<project>-<env>`); the team namespace is auto-resolved from the token.
@@ -51,6 +52,12 @@ These are prompted at apply (stdin) and written into the matching `.env.<environ
 | `STRIPE_WEBHOOK_SECRET` | Provisioned from the per-env `STRIPE_SECRET_KEY` |
 | `RAILWAY_TOKEN` (per-env) | Minted from `RAILWAY_API_TOKEN` |
 | `JWT_*`, `SECRETS_ENCRYPTION_KEY` | Generated locally |
+| `REDIS_KEY_PREFIX`, `WEBAUTHN_RP_ID`, `WEBAUTHN_RP_NAME` | Derived from `setup.config.json` (product name, `frontend.url.<env>`) |
+| `OAUTH_*_REDIRECT_URI`, `SCALAR_SLUG` | Derived by their providers from the SPA origin / project name |
+| `RELEASE_PLEASE_TOKEN` (backend + frontend) | Your `GITHUB_TOKEN` — GitHub has no API to mint a personal token |
+| `MONTHLY_DATABASE_RESTORE_DRILL_NEON_API_KEY` | Your `NEON_API_KEY` |
+| `SENTRY_AUTH_TOKEN` (frontend, source maps) | Your `SENTRY_AUTH_TOKEN` |
+| `NETLIFY_SITE_ID`, `NETLIFY_AUTH_TOKEN` (frontend) | The site found/created from the production frontend URL; your Netlify token |
 
 ## Shared vs per-codebase naming
 

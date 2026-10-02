@@ -1049,10 +1049,15 @@ export const setupNeonProvider: InfraProvider = {
       };
     }
   },
-  toEnvironmentVariables: ({ state }, environmentName) => {
+  toEnvironmentVariables: ({ config, secrets, state }, environmentName) => {
+    // The scheduled restore drill drives the Neon API itself; it uses the same key setup does.
+    const drillKey: Record<string, string> =
+      config.providers.neon.enabled && secrets.neon?.apiKey
+        ? { MONTHLY_DATABASE_RESTORE_DRILL_NEON_API_KEY: secrets.neon.apiKey }
+        : {};
     const branch = state.neon?.branches?.[environmentName];
-    if (!branch) return {};
-    const variables: Record<string, string> = { DATABASE_URL: branch.databaseUrl };
+    if (!branch) return drillKey;
+    const variables: Record<string, string> = { ...drillKey, DATABASE_URL: branch.databaseUrl };
     // DATABASE_MIGRATION_URL must be the DIRECT (non-pooler) owner URL captured at provision time
     // (getConnectionUri with pooled: false). NEVER fall back to branch.databaseUrl — that is the
     // POOLED, least-privilege runtime URL, and migrate.ts rejects a pooler host (the migration

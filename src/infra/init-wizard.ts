@@ -196,6 +196,7 @@ export function buildConfig(
       },
       postman: { enabled: true },
       scalar: { enabled: true },
+      netlify: { enabled: true },
     },
     app: {
       port: 3000,

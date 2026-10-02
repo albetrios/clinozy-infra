@@ -170,6 +170,9 @@ export const setupConfigSchema = z.object({
     }),
     postman: z.object({ enabled: z.boolean() }),
     scalar: z.object({ enabled: z.boolean() }),
+    // The frontend's Netlify site — found (or created) from `frontend.url.production`. Optional so
+    // configs that predate it keep loading; absent means disabled.
+    netlify: z.object({ enabled: z.boolean() }).optional(),
   }),
   app: z.object({
     port: z.number().int().default(3000),

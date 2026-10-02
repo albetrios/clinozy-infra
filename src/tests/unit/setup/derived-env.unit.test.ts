@@ -35,7 +35,7 @@ const offline = (config: SetupConfig): SetupConfig => ({
   providers: Object.fromEntries(
     Object.entries(config.providers).map(([key, provider]) => [
       key,
-      'enabled' in provider ? { ...provider, enabled: false } : provider,
+      provider && 'enabled' in provider ? { ...provider, enabled: false } : provider,
     ]),
   ) as SetupConfig['providers'],
 });
@@ -45,12 +45,13 @@ const withSpa = (url: Record<string, string>): SetupConfig => ({
   frontend: { name: 'acme-fe', url },
 });
 
-describe('FRONTEND_URL in the backend env', () => {
+/** Point both target roots at throwaway dirs so nothing reads the real sibling repos. */
+function useTempTargets(): void {
   let backendDir = '';
   let frontendDir = '';
   beforeEach(() => {
-    backendDir = mkdtempSync(join(tmpdir(), 'frontend-url-be-'));
-    frontendDir = mkdtempSync(join(tmpdir(), 'frontend-url-fe-'));
+    backendDir = mkdtempSync(join(tmpdir(), 'derived-env-be-'));
+    frontendDir = mkdtempSync(join(tmpdir(), 'derived-env-fe-'));
     setTargetRoot(backendDir);
     setFrontendRoot(frontendDir);
   });
@@ -60,6 +61,10 @@ describe('FRONTEND_URL in the backend env', () => {
     setTargetRoot(undefined);
     setFrontendRoot(undefined);
   });
+}
+
+describe('FRONTEND_URL in the backend env', () => {
+  useTempTargets();
 
   const frontendUrl = (environment: string, config: SetupConfig): string | undefined =>
     buildEnvironmentVariables(environment, offline(config), {} as SetupSecrets, state).FRONTEND_URL;
@@ -101,71 +106,104 @@ describe('FRONTEND_URL in the backend env', () => {
   });
 });
 
-describe('identity-derived backend keys', () => {
-  const secrets = {} as SetupSecrets;
+describe('identity-derived backend keys (owned by no provider)', () => {
   const config = (): SetupConfig => ({
     ...withSpa({ development: 'http://localhost:5173', production: 'https://app.acme.test' }),
     product: { name: 'acme' },
   });
 
-  it('derives the Redis prefix, passkey RP, OAuth redirects and Scalar slug from the identity', () => {
-    expect(deriveIdentityVariables('production', config(), secrets)).toEqual({
+  it('derives the Redis prefix and the passkey relying party from the identity', () => {
+    expect(deriveIdentityVariables('production', config())).toEqual({
       REDIS_KEY_PREFIX: 'acme:prod:',
       WEBAUTHN_RP_NAME: 'Acme',
       WEBAUTHN_RP_ID: 'app.acme.test',
-      OAUTH_GITHUB_REDIRECT_URI: 'https://app.acme.test/callback/github',
-      OAUTH_GOOGLE_REDIRECT_URI: 'https://app.acme.test/callback/google',
-      SCALAR_SLUG: 'acme-be-production',
     });
-    expect(deriveIdentityVariables('development', config(), secrets)).toMatchObject({
+    expect(deriveIdentityVariables('development', config())).toEqual({
       REDIS_KEY_PREFIX: 'acme:dev:',
+      WEBAUTHN_RP_NAME: 'Acme',
       WEBAUTHN_RP_ID: 'localhost',
-      OAUTH_GITHUB_REDIRECT_URI: 'http://localhost:5173/callback/github',
-      SCALAR_SLUG: 'acme-be-development',
     });
   });
 
   it('tags any other environment with its own name', () => {
-    expect(deriveIdentityVariables('staging', config(), secrets).REDIS_KEY_PREFIX).toBe(
-      'acme:staging:',
-    );
+    expect(deriveIdentityVariables('staging', config()).REDIS_KEY_PREFIX).toBe('acme:staging:');
   });
 
-  it('omits what it cannot derive instead of guessing', () => {
+  it('omits the RP id when the environment has no frontend URL, instead of guessing', () => {
     const noProductionSpa: SetupConfig = {
       ...config(),
       frontend: { name: 'acme-fe', url: { development: 'http://localhost:5173' } },
     };
-    const derived = deriveIdentityVariables('production', noProductionSpa, secrets);
-    expect(derived).not.toHaveProperty('WEBAUTHN_RP_ID');
-    expect(derived).not.toHaveProperty('OAUTH_GITHUB_REDIRECT_URI');
-  });
-
-  it('writes redirect URIs and the Scalar slug only for enabled providers', () => {
-    const base = offline(config());
-    const githubOnly: SetupConfig = {
-      ...base,
-      providers: {
-        ...base.providers,
-        oauth: { google: { enabled: false }, github: { enabled: true } },
-      },
-    };
-    const derived = deriveIdentityVariables('production', githubOnly, secrets);
-    expect(derived.OAUTH_GITHUB_REDIRECT_URI).toBe('https://app.acme.test/callback/github');
-    expect(derived).not.toHaveProperty('OAUTH_GOOGLE_REDIRECT_URI');
-    expect(derived).not.toHaveProperty('SCALAR_SLUG');
-  });
-
-  it('honours a SCALAR_SLUG override from .setup-credentials', () => {
-    const override = { scalar: { slug: 'acme-api' } } as unknown as SetupSecrets;
-    expect(deriveIdentityVariables('production', config(), override).SCALAR_SLUG).toBe(
-      'acme-api-production',
+    expect(deriveIdentityVariables('production', noProductionSpa)).not.toHaveProperty(
+      'WEBAUTHN_RP_ID',
     );
   });
 
   it('never writes OTEL_SERVICE_NAME — the backend names the API and the worker itself', () => {
-    expect(deriveIdentityVariables('production', config(), secrets)).not.toHaveProperty(
-      'OTEL_SERVICE_NAME',
+    expect(deriveIdentityVariables('production', config())).not.toHaveProperty('OTEL_SERVICE_NAME');
+  });
+});
+
+describe('provider-owned keys in the backend env map', () => {
+  useTempTargets();
+  const secrets = {
+    neon: { apiKey: 'fake-neon-key' },
+    github: { token: 'fake-github-token' },
+    scalar: {},
+  } as unknown as SetupSecrets;
+  /** Every provider off except the overrides — each key is attributed to exactly one provider. */
+  const config = (providers: Partial<SetupConfig['providers']>): SetupConfig => {
+    const quiet = offline({
+      ...withSpa({ development: 'http://localhost:5173', production: 'https://app.acme.test' }),
+      product: { name: 'acme' },
+    });
+    return {
+      ...quiet,
+      providers: {
+        ...quiet.providers,
+        oauth: { google: { enabled: false }, github: { enabled: false } },
+        ...providers,
+      },
+    };
+  };
+  const env = (environment: string, cfg: SetupConfig, withSecrets: SetupSecrets = secrets) =>
+    buildEnvironmentVariables(environment, cfg, withSecrets, state);
+
+  it('derives each OAuth redirect URI from the SPA origin, only for its enabled provider', () => {
+    const github = config({ oauth: { google: { enabled: false }, github: { enabled: true } } });
+    expect(env('production', github).OAUTH_GITHUB_REDIRECT_URI).toBe(
+      'https://app.acme.test/callback/github',
+    );
+    expect(env('development', github).OAUTH_GITHUB_REDIRECT_URI).toBe(
+      'http://localhost:5173/callback/github',
+    );
+    expect(env('production', github)).not.toHaveProperty('OAUTH_GOOGLE_REDIRECT_URI');
+    const google = config({ oauth: { google: { enabled: true }, github: { enabled: false } } });
+    expect(env('production', google).OAUTH_GOOGLE_REDIRECT_URI).toBe(
+      'https://app.acme.test/callback/google',
+    );
+  });
+
+  it('keeps SCALAR_SLUG on the slug setup publishes to, honouring an override', () => {
+    const scalar = config({ scalar: { enabled: true } });
+    expect(env('production', scalar).SCALAR_SLUG).toBe('acme-be-production');
+    const override = { ...secrets, scalar: { slug: 'acme-api' } } as unknown as SetupSecrets;
+    expect(env('production', scalar, override).SCALAR_SLUG).toBe('acme-api-production');
+    expect(env('production', config({}))).not.toHaveProperty('SCALAR_SLUG');
+  });
+
+  it('hands the release token and the restore-drill key over from the setup credentials', () => {
+    const on = config({
+      github: { ...base().providers.github, enabled: true },
+      neon: { ...base().providers.neon, enabled: true },
+    });
+    expect(env('production', on)).toMatchObject({
+      RELEASE_PLEASE_TOKEN: 'fake-github-token',
+      MONTHLY_DATABASE_RESTORE_DRILL_NEON_API_KEY: 'fake-neon-key',
+    });
+    expect(env('production', config({}))).not.toHaveProperty('RELEASE_PLEASE_TOKEN');
+    expect(env('production', config({}))).not.toHaveProperty(
+      'MONTHLY_DATABASE_RESTORE_DRILL_NEON_API_KEY',
     );
   });
 });

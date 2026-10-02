@@ -219,6 +219,11 @@ export async function provision(
 
 export const setupScalarProvider: InfraProvider = {
   key: 'scalar',
+  // The backend's own docs workflow publishes to SCALAR_SLUG — keep it on the slug setup created.
+  toEnvironmentVariables: ({ config, secrets }, environmentName) =>
+    config.providers.scalar.enabled
+      ? { SCALAR_SLUG: scalarSlugForEnvironment(config, secrets, environmentName) }
+      : {},
   name: 'Scalar',
   isEnabled: ({ config, secrets }) =>
     config.providers.scalar.enabled && Boolean(secrets.scalar.apiKey),

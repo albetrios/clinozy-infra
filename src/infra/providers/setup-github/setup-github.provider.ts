@@ -125,6 +125,12 @@ export async function syncGithubFoundations(environmentNames?: readonly string[]
 
 export const setupGithubProvider: InfraProvider = {
   key: 'github',
+  // release-please needs a real token (a GITHUB_TOKEN-created release does not trigger the deploy
+  // workflow), and GitHub has no API to mint one — so the operator's GITHUB_TOKEN is the source.
+  toEnvironmentVariables: ({ config, secrets }) =>
+    config.providers.github.enabled && secrets.github?.token
+      ? { RELEASE_PLEASE_TOKEN: secrets.github.token }
+      : {},
   name: 'GitHub (branches, rulesets, environments)',
   isEnabled: ({ config }) => config.providers.github.enabled,
   disabledReason: () => 'GitHub provider disabled in setup.config.json',

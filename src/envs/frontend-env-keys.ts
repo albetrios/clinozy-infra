@@ -3,10 +3,9 @@
  *
  * clinozy-fe is a fully independent target: these are written straight into the frontend repo's own
  * `.env.<environment>` (resolved via {@link frontendRoot}) via a SURGICAL upsert — only the mapped
- * `VITE_*` keys plus the build-time Sentry identifiers (`SENTRY_ORG`, `SENTRY_PROJECT`) are written;
- * every other clinozy-fe key, comment, and blank line is preserved byte-for-byte. The Sentry *auth
- * token* is a CI-only secret and is deliberately NEVER emitted here. Mirrors the backend upsert in
- * `export-env-files.ts`.
+ * `VITE_*` keys, the build-time Sentry identifiers (`SENTRY_ORG`, `SENTRY_PROJECT`) and the CI deploy
+ * secrets (see {@link ciDeploySecrets}) are written; every other clinozy-fe key, comment, and blank
+ * line is preserved byte-for-byte. Mirrors the backend upsert in `export-env-files.ts`.
  */
 import { resolve } from 'node:path';
 import { frontendRoot } from '@setup/common/paths.js';
@@ -40,6 +39,37 @@ export function frontendEnvFilePath(environmentName: string): string {
 }
 
 /**
+ * CI-only deploy secrets for clinozy-fe, sourced from setup credentials and state.
+ *
+ * clinozy-fe's own `pnpm github:sync` pushes these from its `.env.<environment>` into its GitHub
+ * Environments (they are listed in its `deploySecrets`). The files are gitignored, and Vite only
+ * exposes `VITE_*` keys to the bundle, so none of these reach the browser. Previously the Sentry token
+ * was kept out "of the committed env file" — but these files are not committed, and leaving the keys
+ * out meant every one of them had to be pasted by hand.
+ */
+export function ciDeploySecrets(
+  config: SetupConfig,
+  secrets: SetupSecrets,
+  state: SetupState,
+): Record<string, string> {
+  const fresh: Record<string, string> = {};
+  if (config.providers.netlify?.enabled) {
+    // One Netlify site serves every environment, so the same pair goes into each file.
+    if (state.netlify?.siteId) fresh.NETLIFY_SITE_ID = state.netlify.siteId;
+    if (secrets.netlify?.authToken) fresh.NETLIFY_AUTH_TOKEN = secrets.netlify.authToken;
+  }
+  // Source-map upload during the frontend build.
+  if (config.providers.sentry.enabled && secrets.sentry?.authToken) {
+    fresh.SENTRY_AUTH_TOKEN = secrets.sentry.authToken;
+  }
+  // release-please in the frontend's CI — the same token the backend gets.
+  if (config.providers.github.enabled && secrets.github?.token) {
+    fresh.RELEASE_PLEASE_TOKEN = secrets.github.token;
+  }
+  return fresh;
+}
+
+/**
  * Fresh, non-empty clinozy-fe values to write into the target file, keyed by their env-file name.
  * Empty values are excluded so a stateless run never blanks an existing key.
  */
@@ -57,8 +87,7 @@ export function freshFrontendValues(
     if (value !== '') fresh[vite] = value;
   }
   // Non-VITE, build-time Sentry identifiers for clinozy-fe's sourcemap upload — public, sourced from
-  // config (single source of truth). The SECRET half (SENTRY_AUTH_TOKEN) is a CI-only secret and is
-  // deliberately NEVER emitted into the committed env file.
+  // config (single source of truth). The token half comes with the other CI secrets below.
   if (config.providers.sentry.enabled) {
     if (config.providers.sentry.organization) {
       fresh.SENTRY_ORG = config.providers.sentry.organization;
@@ -67,7 +96,7 @@ export function freshFrontendValues(
       fresh.SENTRY_PROJECT = config.frontend.name;
     }
   }
-  return fresh;
+  return { ...fresh, ...ciDeploySecrets(config, secrets, state) };
 }
 
 /**

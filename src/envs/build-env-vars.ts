@@ -7,12 +7,7 @@ import type {
   SetupState,
 } from '@setup/common/types.js';
 import { getInfraProviders } from '@setup/infra/providers/index.js';
-import {
-  frontendOriginForEnvironment,
-  oauthCallbackUrl,
-  productName,
-  scalarSlugForEnvironment,
-} from '@setup/envs/env-file-setup.util.js';
+import { frontendOriginForEnvironment, productName } from '@setup/envs/env-file-setup.util.js';
 import { productNameOf } from '@setup/identity/identity.js';
 import { readEnvFile } from '@setup/envs/read-env-file.js';
 
@@ -40,14 +35,15 @@ const ENVIRONMENT_TAGS: Readonly<Record<string, string>> = {
 };
 
 /**
- * Backend keys that are pure functions of the product identity and the SPA origin.
+ * Backend keys that are pure functions of the product identity and the SPA origin, owned by no
+ * provider (provider-owned keys — OAuth redirect URIs, SCALAR_SLUG, … — come from each provider's
+ * `toEnvironmentVariables`).
  *
- * Derived on every run rather than pasted, so a rename (or a new environment) can never leave the
- * previous product's values behind — the first clinozy run found `REDIS_KEY_PREFIX=core:dev:` in
- * production, `WEBAUTHN_RP_NAME=YourApp`, `WEBAUTHN_RP_ID=localhost` in production, a stale
- * `SCALAR_SLUG` and a localhost OAuth redirect, all hand-kept. Keys whose source is unknown (no
- * `frontend.url` for the env, provider disabled) are omitted, and the exporter never blanks a key,
- * so an existing value survives until it can be derived.
+ * Derived on every run rather than pasted, so a rename can never leave the previous product's
+ * values behind — the first clinozy run found `REDIS_KEY_PREFIX=core:dev:` in production,
+ * `WEBAUTHN_RP_NAME=YourApp` and `WEBAUTHN_RP_ID=localhost` in production, all hand-kept. A key
+ * whose source is unknown (no `frontend.url` for the env) is omitted, and the exporter never blanks
+ * a key, so an existing value survives until it can be derived.
  *
  * `OTEL_SERVICE_NAME` is deliberately NOT here: the backend names the API and the worker itself
  * (`<project>-api` / `<project>-worker`), and any env value would override both with one name.
@@ -55,7 +51,6 @@ const ENVIRONMENT_TAGS: Readonly<Record<string, string>> = {
 export function deriveIdentityVariables(
   environmentName: string,
   config: SetupConfig,
-  secrets: SetupSecrets,
 ): Partial<EnvironmentVariables> {
   const namespace = productName(config);
   const variables: Partial<EnvironmentVariables> = {
@@ -70,16 +65,6 @@ export function deriveIdentityVariables(
     } catch {
       // An unparseable frontend.url is reported by `pnpm setup:infra:doctor`; leave the key alone.
     }
-    if (config.providers.oauth.github.enabled) {
-      variables.OAUTH_GITHUB_REDIRECT_URI = oauthCallbackUrl(config, environmentName, 'github');
-    }
-    if (config.providers.oauth.google.enabled) {
-      variables.OAUTH_GOOGLE_REDIRECT_URI = oauthCallbackUrl(config, environmentName, 'google');
-    }
-  }
-
-  if (config.providers.scalar.enabled) {
-    variables.SCALAR_SLUG = scalarSlugForEnvironment(config, secrets, environmentName);
   }
   return variables;
 }
@@ -94,8 +79,8 @@ export function deriveIdentityVariables(
  * via `provider.toEnvironmentVariables()` — so adding a provider never touches this file. The
  * required-but-provisioned keys (`DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`) start as empty
  * defaults and are overwritten by their owning provider (Neon / Railway Redis / JWT) when
- * state is populated. **Side effects:** none (pure). Identity-bound keys (Redis prefix, passkey
- * RP id/name, OAuth redirect URIs, Scalar slug) come from {@link deriveIdentityVariables}. OAuth
+ * state is populated. **Side effects:** none (pure). Identity-bound keys owned by no provider
+ * (Redis prefix, passkey RP id/name) come from {@link deriveIdentityVariables}. OAuth
  * client ids/secrets are intentionally NOT produced here — they live directly in `.env.<environment>`. Cloudflare Turnstile (CAPTCHA_*) and Stripe
  * (STRIPE_*) ARE produced here: their providers read keys from `.setup-credentials` and emit the
  * matching `.env.<environment>` slice via `toEnvironmentVariables()`.
@@ -140,7 +125,7 @@ export function buildEnvironmentVariables(
   if (frontendUrl) {
     variables.FRONTEND_URL = frontendUrl;
   }
-  Object.assign(variables, deriveIdentityVariables(environmentName, config, secrets));
+  Object.assign(variables, deriveIdentityVariables(environmentName, config));
 
   // Each provider owns its own `.env.<environment>` slice (Neon → DATABASE_URL, AWS → S3_*, …).
   const context: InfraProviderContext = {

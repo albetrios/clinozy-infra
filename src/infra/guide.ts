@@ -394,6 +394,23 @@ function buildGuideSteps(config: SetupConfig): GuideStepDefinition[] {
         '   Optional: pin SCALAR_NAMESPACE / SCALAR_SLUG in .setup-credentials for multi-team accounts.',
       ],
     },
+    {
+      providerName: 'Netlify',
+      enabledCheck: (configuration) => configuration.providers.netlify?.enabled === true,
+      // Satisfied by NETLIFY_AUTH_TOKEN or by the Netlify CLI's saved login (`netlify login`).
+      secretsCheck: (secrets) => isSecretFilled(secrets.netlify?.authToken),
+      browserUrls: ['https://app.netlify.com/user/applications#personal-access-tokens'],
+      secretPrompts: [{ key: 'NETLIFY_AUTH_TOKEN', label: 'Netlify personal access token' }],
+      instructions: [
+        '1. Log in to Netlify → User settings → Applications → Personal access tokens',
+        '2. New access token → copy it',
+        `3. In ${secretsPath} set: NETLIFY_AUTH_TOKEN=<paste-here>`,
+        '   (or skip this: a `netlify login` on this machine is used when the key is absent)',
+        '',
+        '4. Save the file. setup:infra finds the frontend site from the production frontend URL —',
+        '   creating it when missing — and writes NETLIFY_SITE_ID + NETLIFY_AUTH_TOKEN to the frontend env.',
+      ],
+    },
   ];
 
   return steps;

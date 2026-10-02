@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { toolRoot } from '@setup/common/paths.js';
 import { ensureSecretDir, writeSecretFile } from '@setup/common/secure-file.js';
 import { resolve } from 'node:path';
@@ -29,6 +30,8 @@ const TOKEN_URLS: Record<string, string> = {
     'https://dash.cloudflare.com/profile/api-tokens (token with Turnstile:Edit)',
   CLOUDFLARE_ACCOUNT_ID:
     'https://dash.cloudflare.com → any domain → Overview (Account ID in the right sidebar)',
+  NETLIFY_AUTH_TOKEN:
+    'https://app.netlify.com/user/applications#personal-access-tokens (optional when logged in with the Netlify CLI)',
 };
 
 const SIMPLE_VARS: Array<[string, string]> = [
@@ -50,6 +53,9 @@ const SIMPLE_VARS: Array<[string, string]> = [
   // each .env.<environment>. So the inputs here are the Cloudflare credentials, not CAPTCHA_*.
   ['CLOUDFLARE_API_TOKEN', TOKEN_URLS.CLOUDFLARE_API_TOKEN ?? ''],
   ['CLOUDFLARE_ACCOUNT_ID', TOKEN_URLS.CLOUDFLARE_ACCOUNT_ID ?? ''],
+  // Netlify: setup finds (or creates) the frontend's site and writes NETLIFY_SITE_ID +
+  // NETLIFY_AUTH_TOKEN into the frontend env. Falls back to the Netlify CLI's saved login.
+  ['NETLIFY_AUTH_TOKEN', TOKEN_URLS.NETLIFY_AUTH_TOKEN ?? ''],
 ];
 
 // ─── Zod schemas ────────────────────────────────────────────────────────────
@@ -115,6 +121,18 @@ export const setupSecretsSchema = z.object({
    * namespace is auto-resolved from the token (the active team); slug defaults to the project
    * name. `namespace` / `slug` are optional pins for multi-team accounts or a custom slug.
    */
+  /**
+   * GitHub token (`GITHUB_TOKEN`). Besides driving `gh` for repo/env setup, it is the token the
+   * apps' release automation uses: emitted as `RELEASE_PLEASE_TOKEN` (GitHub offers no API to mint
+   * a personal token, so the one the operator already provided is the source).
+   */
+  github: z.object({ token: z.string().optional() }),
+  /**
+   * Netlify personal access token (`NETLIFY_AUTH_TOKEN`), or the Netlify CLI's saved login when
+   * absent. Finds/creates the frontend site and is emitted into the frontend env, where the
+   * frontend's CI uses it to deploy.
+   */
+  netlify: z.object({ authToken: z.string().optional() }),
   scalar: z.object({
     /** Account API key used by `scalar auth login --token`. */
     apiKey: z.string().optional(),
@@ -171,6 +189,49 @@ function get(source: Record<string, string>, key: string): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+/** Where the Netlify CLI keeps its login (`netlify login`), per platform. */
+function netlifyCliConfigPath(): string {
+  if (process.platform === 'darwin') {
+    return resolve(homedir(), 'Library', 'Preferences', 'netlify', 'config.json');
+  }
+  if (process.platform === 'win32') {
+    return resolve(process.env.APPDATA ?? homedir(), 'netlify', 'Config', 'config.json');
+  }
+  return resolve(
+    process.env.XDG_CONFIG_HOME ?? resolve(homedir(), '.config'),
+    'netlify',
+    'config.json',
+  );
+}
+
+/**
+ * The active user's token from the Netlify CLI config text (`{ userId, users: { <id>: { auth:
+ * { token } } } }`), or '' when there is no usable login. Mirrors how the GitHub and Railway CLIs
+ * stand in for a token elsewhere in setup.
+ */
+export function netlifyTokenFromCliConfig(configText: string): string {
+  try {
+    const parsed = JSON.parse(configText) as {
+      userId?: string;
+      users?: Record<string, { auth?: { token?: string } }>;
+    };
+    const token = parsed.userId ? parsed.users?.[parsed.userId]?.auth?.token : undefined;
+    return typeof token === 'string' ? token.trim() : '';
+  } catch {
+    return '';
+  }
+}
+
+function netlifyCliToken(): string {
+  const path = netlifyCliConfigPath();
+  if (!existsSync(path)) return '';
+  try {
+    return netlifyTokenFromCliConfig(readFileSync(path, 'utf-8'));
+  } catch {
+    return '';
+  }
+}
+
 // ─── Load secrets from .setup-credentials ────────────────────────────────────
 
 export function loadSecretsFromEnv(_environmentNames: string[]): SetupSecrets {
@@ -194,6 +255,8 @@ export function loadSecretsFromEnv(_environmentNames: string[]): SetupSecrets {
     postman: {
       apiKey: get(source, 'POSTMAN_API_KEY') || undefined,
     },
+    github: { token: get(source, 'GITHUB_TOKEN') || undefined },
+    netlify: { authToken: get(source, 'NETLIFY_AUTH_TOKEN') || netlifyCliToken() || undefined },
     scalar: {
       apiKey: get(source, 'SCALAR_API_KEY') || undefined,
       namespace: get(source, 'SCALAR_NAMESPACE') || undefined,

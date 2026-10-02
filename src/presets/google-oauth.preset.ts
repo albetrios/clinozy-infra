@@ -93,6 +93,13 @@ export const googleOauthPreset: GuidePreset = {
     'Copy the Client ID and Client secret and paste OAUTH_GOOGLE_* into .env.<env>.',
   ],
   describe: ({ environments }) => ({ environments }),
+  // Derived from the SPA origin on every run (client id/secret stay user-entered).
+  toEnvironmentVariables: ({ config }, environmentName) => {
+    const redirectUri = config.providers.oauth.google.enabled
+      ? oauthCallbackUrl(config, environmentName, 'google')
+      : '';
+    return redirectUri ? { OAUTH_GOOGLE_REDIRECT_URI: redirectUri } : {};
+  },
   outputs: [
     { key: 'OAUTH_GOOGLE_CLIENT_ID', description: 'Google OAuth client ID' },
     { key: 'OAUTH_GOOGLE_CLIENT_SECRET', description: 'Google OAuth client secret' },

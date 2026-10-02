@@ -35,7 +35,7 @@ Registered in [`infra/providers/index.ts`](./infra/providers/index.ts) — the o
 iterates this list and treats each one uniformly (preview → settings-review →
 detect-existing → interactive step → check → delete-instructions).
 
-`neon` · `aws` · `sentry` · `jwt` · `resend` · `stripe` · `google-oauth` · `github-app-with-oauth` ·
+`neon` · `aws` · `sentry` · `jwt` · `resend` · `stripe` · `google-oauth` · `github-app-with-oauth` · `netlify` ·
 `posthog` · `turnstile` · `railway` · `railway-redis` · `github` · `postman` · `scalar`
 
 Enable/disable each in `setup.config.json` (`providers.<key>.enabled`). Fill its tokens in
