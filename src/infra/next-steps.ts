@@ -332,15 +332,24 @@ export async function buildNextSteps(options: {
     ],
   });
 
-  // 6. Build attestations on a private repository.
-  if ((await checks.repositoryIsPrivate(backendRepository)) === true) {
+  // 6. Artifact attestations on a private repository.
+  const privateRepositories = (
+    await Promise.all(
+      repositories.map(async (repository) => ({
+        repository,
+        isPrivate: await checks.repositoryIsPrivate(repository),
+      })),
+    )
+  ).filter((entry) => entry.isPrivate === true);
+  if (privateRepositories.length > 0) {
     steps.push({
-      title: 'Decide on the backend build attestations (private repository)',
+      title: 'Artifact attestations on private repositories',
       status: 'manual',
       lines: [
-        'GitHub stores artifact attestations for private repositories only on GitHub Enterprise Cloud;',
-        "on other plans the backend's attest steps fail the image build. Upgrade the plan, make the",
-        'repository public, or gate those steps.',
+        'GitHub stores attestations for a private repository only on GitHub Enterprise Cloud; on other',
+        "plans the apps' attest steps fail the build. `pnpm setup:infra:deploy` sets",
+        "ARTIFACT_ATTESTATIONS=disabled where the plan can't store them (the steps then skip with a warning):",
+        ...privateRepositories.map((entry) => `  ${entry.repository}`),
       ],
     });
   }
@@ -352,12 +361,17 @@ export async function buildNextSteps(options: {
     lines: [
       'Backend: post-merge CI → image → Railway development (migrate → seed → API → worker).',
       'Frontend: post-merge CI → Netlify development alias.',
+      'A failed post-merge run: `pnpm setup:infra:deploy` re-runs its failed jobs.',
     ],
   });
   steps.push({
-    title: "Go live — merge each app's release-please Release PR",
+    title: "Go live — merge each app's Release PR, then deploy it from main",
     status: 'manual',
-    lines: ['Triggers release-deploy → Railway production / Netlify production.'],
+    lines: [
+      'Merging the release-please Release PR creates the release tag. Production accepts protected',
+      'branches only, so the release does not deploy by itself:',
+      "  pnpm setup:infra:deploy --production   (release-deploy.yml from main with each app's latest tag)",
+    ],
   });
   return steps;
 }

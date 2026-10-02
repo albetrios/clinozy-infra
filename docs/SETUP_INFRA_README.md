@@ -19,6 +19,8 @@ interactive by default (`--yes` for an unattended run).
  7. Finalize             writes ../clinozy-be/.env.<env> and ../clinozy-fe/.env.<env>
                          (only provisioned keys; other keys untouched; retired keys removed)
  8. Summary + checklist  numbered "Next steps" with live checks — `pnpm setup:infra:next` re-prints it
+ 9. Ship (separately)    `pnpm setup:infra:deploy [--production]` — attestations switch, failed
+                         post-merge CI re-run, production deploy from main
 ```
 
 | What | Where |
@@ -88,6 +90,7 @@ environment, `netlify` finds or creates the frontend site.
 | `setup:infra:inspect` | Live remote inspection: present/absent + config-vs-remote field diff |
 | `setup:infra:preview` | Token checklist: providers, where to get each key (no writes) |
 | `setup:infra:next` | The "Next steps" checklist with live checks (DNS, GitHub secrets, DB users, …) |
+| `setup:infra:deploy` | Ship both apps: `ARTIFACT_ATTESTATIONS` from the plan, re-run the failed post-merge CI on `main`; `--production` deploys each latest release from `main` (`--app`, `--tag`, `--yes`). Steps: [README → Go live](../README.md#go-live--step-by-step) |
 | `setup:infra:prereqs` | The prerequisites check on its own: tools, logins, config, credentials |
 | `setup:infra:doctor` | Config footguns (missing domain, wrong URLs, …) |
 | `setup:infra:check` / `setup:infra:status` | Health check / per-environment status matrix |
@@ -138,7 +141,7 @@ retained API client — Neon, AWS, Railway, Sentry, …). Authoring rules: the `
 | Area | Files |
 | --- | --- |
 | Entry point + flags | `src/setup.ts` |
-| Orchestrator, guide, checklist | `src/infra/orchestrator.ts`, `src/infra/guide.ts`, `src/infra/next-steps.ts` |
+| Orchestrator, guide, checklist, deploy | `src/infra/orchestrator.ts`, `src/infra/guide.ts`, `src/infra/next-steps.ts`, `src/infra/deploy.ts` |
 | Config + init | `src/common/config.ts` (setup.config.json schema), `src/infra/init-wizard.ts`, `src/infra/infra-config.ts` (`defineInfraConfig`) |
 | Credentials | `src/common/secrets.ts` (template, per-environment keys, `TOKEN_URLS`) |
 | State | `src/common/state.ts` |

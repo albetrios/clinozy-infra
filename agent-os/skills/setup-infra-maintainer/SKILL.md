@@ -77,7 +77,7 @@ no longer use, add them to the retired-key lists in `src/envs/export-env-files.t
 | --- | --- |
 | Config & init | `src/common/config.ts`, `src/infra/init-wizard.ts`, `setup.config.json` |
 | Credentials | `src/common/secrets.ts` |
-| Guide · checklist | `src/infra/guide.ts` · `src/infra/next-steps.ts` |
+| Guide · checklist · deploy | `src/infra/guide.ts` · `src/infra/next-steps.ts` · `src/infra/deploy.ts` |
 | Orchestrator (don't edit for a provider) | `src/infra/orchestrator.ts` |
 | Prerequisites | `src/infra/prerequisites.ts` |
 | Providers · presets · composition | `src/infra/providers/setup-<key>/`, `src/presets/`, `infra.config.ts` |

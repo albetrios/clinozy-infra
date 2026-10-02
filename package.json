@@ -19,6 +19,7 @@
     "setup:infra:prereqs": "tsx src/setup.ts --prereqs",
     "setup:infra:doctor": "tsx src/setup.ts --doctor",
     "setup:infra:next": "tsx src/setup.ts --next",
+    "setup:infra:deploy": "tsx src/setup.ts --deploy",
     "setup:infra:example": "tsx src/setup.ts --example",
     "setup:infra:guide": "tsx src/setup.ts --guide",
     "setup:infra:vault": "tsx src/setup.ts --vault",
