@@ -8,6 +8,7 @@
  * inspectRemote/check/deleteInstructions/detectRemote). Splitting API calls from
  * wiring per-provider can follow later, ideally with integration testing.
  */
+import { NETLIFY_LOGIN_COMMAND } from '@setup/common/secrets.js';
 import { setupAwsProvider } from '@setup/infra/providers/setup-aws/setup-aws.provider.js';
 import { setupCloudflareTurnstileProvider } from '@setup/infra/providers/setup-cloudflare-turnstile/setup-cloudflare-turnstile.provider.js';
 import { setupGithubProvider } from '@setup/infra/providers/setup-github/setup-github.provider.js';
@@ -31,11 +32,10 @@ export const neonPreset: ManagedPreset = {
   credentials: ['NEON_API_KEY'],
   dashboard: { url: 'https://console.neon.tech/app/settings/api-keys', label: 'Neon → API keys' },
   outputs: [
-    { key: 'DATABASE_URL', description: 'Pooled Postgres connection string' },
+    { key: 'DATABASE_URL', description: 'Pooled connection as the backend app role (runtime)' },
     {
       key: 'DATABASE_MIGRATION_URL',
-      description:
-        'Direct connection for migrations — the migrator login, or the owner until it exists',
+      description: 'Direct connection as the backend migrator — the deploy runs migrations with it',
     },
     { key: 'DATABASE_MAINTENANCE_URL', description: 'Pooled connection as the maintenance role' },
     {
@@ -210,11 +210,13 @@ export const netlifyPreset: ManagedPreset = {
   key: 'netlify',
   name: 'Netlify',
   provider: setupNetlifyProvider,
-  credentials: ['NETLIFY_AUTH_TOKEN'],
-  dashboard: {
-    url: 'https://app.netlify.com/user/applications#personal-access-tokens',
-    label: 'Netlify → personal access tokens',
-  },
+  // No credential: the token comes only from the Netlify CLI login on this machine.
+  credentials: [],
+  dashboard: { url: 'https://docs.netlify.com/cli/get-started/', label: 'Netlify CLI' },
+  steps: [
+    `Log in once on this machine: ${NETLIFY_LOGIN_COMMAND} (opens the browser; no global install needed).`,
+    'Run pnpm setup:infra — it finds or creates the frontend site and writes NETLIFY_SITE_ID + NETLIFY_AUTH_TOKEN into the frontend env.',
+  ],
   // Frontend-only: NETLIFY_SITE_ID + NETLIFY_AUTH_TOKEN are written to the frontend env by
   // frontend-env-keys.ts, never to the backend env (which is what `outputs` describes).
   outputs: [],

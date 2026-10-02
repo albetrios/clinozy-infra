@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { InfraProvider } from '@setup/common/types.js';
-import { defineInfraConfig } from '@setup/infra/config.js';
+import { defineInfraConfig } from '@setup/infra/infra-config.js';
 import { getInfraProviders } from '@setup/infra/providers/index.js';
 import { resendPreset } from '@setup/presets/index.js';
 

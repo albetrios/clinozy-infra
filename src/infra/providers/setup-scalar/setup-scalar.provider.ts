@@ -13,8 +13,8 @@
  * NAMING (single source of truth = setup.config.json): organization/project names from
  * `config.project.*` (registry slug defaults to `config.project.name`), environment names
  * from `config.environments[].name` — never hardcoded.
- * SECRETS: SCALAR_API_KEY lives in `.setup-credentials` (gitignored, unreadable by the agent via
- * the deny-read guard) and is never printed to the console. See SETUP_INFRA_PROVIDER_TEMPLATE.md.
+ * SECRETS: SCALAR_API_KEY lives in `.setup-credentials` (gitignored, owner-only) and is never
+ * printed to the console. See SETUP_INFRA_PROVIDER_TEMPLATE.md.
  */
 import { execSync } from 'node:child_process';
 import { targetRoot } from '@setup/common/paths.js';

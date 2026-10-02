@@ -12,7 +12,7 @@ import {
   frontendOriginForEnvironment,
 } from '@setup/envs/env-file-setup.util.js';
 import { buildConfig } from '@setup/infra/init-wizard.js';
-import { satisfiesMinimumNode } from '@setup/infra/prerequisites.js';
+import { satisfiesMinimumVersion, strictestMinimum } from '@setup/infra/prerequisites.js';
 import { sameDomains } from '@setup/infra/providers/setup-cloudflare-turnstile/setup-cloudflare-turnstile.provider.js';
 import { ensureResendSenderDomain } from '@setup/presets/resend.preset.js';
 
@@ -78,12 +78,12 @@ describe('hosts derived from product.domain', () => {
   });
 });
 
-describe('satisfiesMinimumNode', () => {
+describe('satisfiesMinimumVersion', () => {
   it('compares a >= engines range against the running Node', () => {
-    expect(satisfiesMinimumNode('>=24.15', '24.13.0')).toBe(false);
-    expect(satisfiesMinimumNode('>=24.15', '24.21.0')).toBe(true);
-    expect(satisfiesMinimumNode('>=24.15', 'v24.15.0')).toBe(true);
-    expect(satisfiesMinimumNode('^24', '20.0.0')).toBe(true); // other shapes are not judged
+    expect(satisfiesMinimumVersion('>=24.15', '24.13.0')).toBe(false);
+    expect(satisfiesMinimumVersion('>=24.15', '24.21.0')).toBe(true);
+    expect(satisfiesMinimumVersion('>=24.15', 'v24.15.0')).toBe(true);
+    expect(satisfiesMinimumVersion('^24', '20.0.0')).toBe(true); // other shapes are not judged
   });
 });
 
@@ -131,5 +131,14 @@ describe('ensureResendSenderDomain', () => {
       await ensureResendSenderDomain('fake-key', 'acme.test', api.fetchImplementation),
     ).toEqual({ status: 'not_started', created: true });
     expect(api.calls).toEqual(['GET /domains', 'POST /domains']);
+  });
+});
+
+describe('strictestMinimum', () => {
+  it('picks the highest >= minimum across repos', () => {
+    expect(strictestMinimum(['>=24', '>=24.15', '>=24.15'])).toBe('>=24.15');
+    expect(strictestMinimum(['>=9', '>=11.1.1', '>=11.1.1'])).toBe('>=11.1.1');
+    expect(strictestMinimum(['>=24.15.0', '>=24.2'])).toBe('>=24.15.0');
+    expect(strictestMinimum(['^24'])).toBeUndefined();
   });
 });

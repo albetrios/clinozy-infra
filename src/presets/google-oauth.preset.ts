@@ -2,7 +2,8 @@
  * Google OAuth preset (guide-only).
  *
  * Google exposes no API to create OAuth clients, so setup prints a step-by-step Google Cloud
- * Console walkthrough (one client per environment) and collects the values you paste into each
+ * Console walkthrough (one client per environment) and collects the values — from
+ * `.setup/.setup-credentials` (`KEY__<environment>`) or pasted at the prompt — into each
  * `.env.<environment>`.
  */
 import type { SetupConfig } from '@setup/common/types.js';
@@ -16,7 +17,7 @@ import type { GuidePreset } from './types.js';
 function buildGoogleOauthGuideInstructions(config: SetupConfig): string[] {
   const projectName = config.project.name;
   const lines: string[] = [
-    'No resource is created — create one Web-application OAuth client per environment in Google Cloud Console, then paste the values into each `.env.<environment>`.',
+    'No resource is created — create one Web-application OAuth client per environment in Google Cloud Console, then put its values in .setup/.setup-credentials; setup writes each `.env.<environment>`.',
     '',
   ];
 
@@ -53,12 +54,14 @@ function buildGoogleOauthGuideInstructions(config: SetupConfig): string[] {
       );
     }
     lines.push(
-      '6. Create, then copy the Client ID (ends .apps.googleusercontent.com) and Client Secret (starts GOCSPX-)',
+      '6. Create, then copy the Client ID (ends .apps.googleusercontent.com) and Client Secret (starts GOCSPX-) right away — Google shows the secret only once (Download JSON)',
     );
-    lines.push(`7. In .env.${environmentName} set:`);
-    lines.push('   OAUTH_GOOGLE_CLIENT_ID=….apps.googleusercontent.com');
-    lines.push('   OAUTH_GOOGLE_CLIENT_SECRET=…');
-    lines.push(`   OAUTH_GOOGLE_REDIRECT_URI=${callbackUrl}`);
+    lines.push(
+      '7. In .setup/.setup-credentials set (setup writes them, plus the redirect URI, into',
+    );
+    lines.push(`   .env.${environmentName}):`);
+    lines.push(`   OAUTH_GOOGLE_CLIENT_ID__${environmentName}=….apps.googleusercontent.com`);
+    lines.push(`   OAUTH_GOOGLE_CLIENT_SECRET__${environmentName}=…`);
     lines.push('');
   }
 
@@ -76,9 +79,9 @@ export const googleOauthPreset: GuidePreset = {
   isEnabled: ({ config }) => config.providers.oauth.google.enabled,
   disabledReason: () => 'Google OAuth disabled in setup.config.json',
   preview: {
-    detail: 'Step-by-step OAuth client setup per .env.<environment>',
+    detail: 'Step-by-step OAuth client setup, one client per environment',
     url: 'https://console.cloud.google.com/apis/credentials',
-    configKey: '.env.<environment> → OAUTH_GOOGLE_CLIENT_ID / _CLIENT_SECRET / _REDIRECT_URI',
+    configKey: '.setup-credentials → OAUTH_GOOGLE_CLIENT_ID / _CLIENT_SECRET __<environment>',
   },
   settingsDetail: 'guide + validate per env file',
   perEnv: true,
@@ -89,8 +92,8 @@ export const googleOauthPreset: GuidePreset = {
   steps: [
     'Open Google Cloud → APIs & Services → Credentials.',
     'Create an OAuth client (Application type: Web application) — one per environment.',
-    'Add the redirect URI shown as OAUTH_GOOGLE_REDIRECT_URI in your .env.<env> (SPA origin + /callback/google).',
-    'Copy the Client ID and Client secret and paste OAUTH_GOOGLE_* into .env.<env>.',
+    'Add the redirect URI setup prints (SPA origin + /callback/google) to the client.',
+    'Copy the Client ID and Client secret into .setup/.setup-credentials as OAUTH_GOOGLE_CLIENT_ID__<env> / OAUTH_GOOGLE_CLIENT_SECRET__<env>.',
   ],
   describe: ({ environments }) => ({ environments }),
   // Derived from the SPA origin on every run (client id/secret stay user-entered).
@@ -108,8 +111,8 @@ export const googleOauthPreset: GuidePreset = {
   instructions: ({ config }) => buildGoogleOauthGuideInstructions(config),
   guide: {
     scope: 'per-environment',
-    guideError: 'guide-only — enter credentials manually in .env.<environment>',
-    summaryLine: 'Google OAuth: credentials saved to .env.<environment>',
+    guideError: 'guide-only — set OAUTH_GOOGLE_*__<environment> in .setup/.setup-credentials',
+    summaryLine: 'Google OAuth: credentials written to .env.<environment>',
     fields: [
       { key: 'OAUTH_GOOGLE_CLIENT_ID', label: 'Client ID (….apps.googleusercontent.com)' },
       { key: 'OAUTH_GOOGLE_CLIENT_SECRET', label: 'Client Secret (GOCSPX-…)', secret: true },

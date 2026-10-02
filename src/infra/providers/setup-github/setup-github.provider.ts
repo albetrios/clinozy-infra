@@ -1,18 +1,20 @@
 /**
  * GitHub provider for `pnpm setup:infra`.
  *
- * Scaffolds the repo, branches, and rulesets, and pushes each `.env.<environment>` to the
- * matching GitHub Environment secrets.
+ * Verifies repository access and makes sure both app repos — the backend and the frontend — have a
+ * GitHub Environment per configured environment (an existing one is left untouched; a missing one is
+ * created empty). Each app's own `pnpm github:sync` then pushes its `.env.<environment>` into it.
  *
  * NAMING (single source of truth = setup.config.json): organization/project names from
  * `config.project.*` (+ `providers.github.repository`), environment names from
  * `config.environments[].name` — never hardcoded.
  * SECRETS: written to `.env.<environment>` only (via build-env-vars), never printed to the
- * console; setup secret files are gitignored and unreadable by the agent (deny-read guard). See SETUP_INFRA_PROVIDER_TEMPLATE.md.
+ * console; setup secret files are gitignored and written owner-only. See SETUP_INFRA_PROVIDER_TEMPLATE.md.
  */
 import { runCommand } from '@setup/common/exec.js';
 import * as logger from '@setup/common/logger.js';
-import { runGithubInit } from '@setup/github/init.js';
+import { frontendRepository } from '@setup/common/config.js';
+import { ensureGithubEnvironment, runGithubInit } from '@setup/github/init.js';
 import type {
   SetupConfig,
   SetupSecrets,
@@ -57,7 +59,7 @@ export async function provision(
   config: SetupConfig,
   _secrets: SetupSecrets,
   _state: SetupState,
-  _environments: string[],
+  environments: string[],
 ): Promise<ProviderResult> {
   const repository = config.providers.github.repository;
   const spinner = logger.startSpinner('Verifying GitHub repository access...');
@@ -65,6 +67,17 @@ export async function provision(
   try {
     ghCommand(['repo', 'view', repository, '--json', 'name']);
     logger.stopSpinner(spinner, `GitHub repository "${repository}" accessible`);
+
+    // Each app's github:sync and deploy workflows need a GitHub Environment per environment.
+    const frontend = frontendRepository(config);
+    for (const repo of [repository, ...(frontend ? [frontend] : [])]) {
+      for (const environment of environments) {
+        const outcome = ensureGithubEnvironment(repo, environment);
+        logger.success(
+          `  GitHub Environment "${environment}" in ${repo} — ${outcome === 'created' ? 'created' : 'already present'}`,
+        );
+      }
+    }
 
     logger.info(
       'Environment-scoped secrets and variables will be pushed by the GitHub sync step (after .env.<environment> export).',
@@ -131,14 +144,14 @@ export const setupGithubProvider: InfraProvider = {
     config.providers.github.enabled && secrets.github?.token
       ? { RELEASE_PLEASE_TOKEN: secrets.github.token }
       : {},
-  name: 'GitHub (branches, rulesets, environments)',
+  name: 'GitHub (environments)',
   isEnabled: ({ config }) => config.providers.github.enabled,
   disabledReason: () => 'GitHub provider disabled in setup.config.json',
   preview: ({ config }) =>
     config.providers.github.enabled
       ? {
           detail:
-            'GITHUB_TOKEN — repo/env secrets (no gh auth login when set). See docs/deployment/setup/setup-token-instructions.md',
+            'GITHUB_TOKEN (or gh auth login) — repository access + GitHub Environments in both app repos',
           url: 'https://github.com/settings/tokens',
           configKey: 'GITHUB_TOKEN',
         }
@@ -149,7 +162,7 @@ export const setupGithubProvider: InfraProvider = {
           {
             bucket: 'resource',
             provider: 'GitHub',
-            detail: `repository "${config.providers.github.repository}" + branches/rulesets + environments (${formatGitHubEnvironmentPlan(config)})`,
+            detail: `GitHub Environments in ${[config.providers.github.repository, frontendRepository(config)].filter(Boolean).join(' + ')} (${formatGitHubEnvironmentPlan(config)})`,
           },
         ]
       : [],
@@ -214,17 +227,14 @@ export const setupGithubProvider: InfraProvider = {
     return Promise.resolve({ present: true, fields });
   },
   buildStep: (context: InfraProviderContext) => ({
-    name: 'GitHub (branches, rulesets, environments)',
+    name: 'GitHub (environments)',
     enabled: setupGithubProvider.isEnabled(context),
     enabledReason: setupGithubProvider.disabledReason(context),
     instructions: [
-      `Will sync repository "${context.config.providers.github.repository}" for ${context.environments.join(', ')}: branch, ruleset, and GitHub Environment (this environment only).`,
-      `Branch/environment plan: ${formatGitHubEnvironmentPlan(context.config)}.`,
-      'Secrets/variables are NOT pushed by this step (deferred for now) — only branches, rulesets, and GitHub Environments are reconciled.',
+      `Will make sure ${[context.config.providers.github.repository, frontendRepository(context.config)].filter(Boolean).join(' and ')} each have a GitHub Environment for ${context.environments.join(', ')} (created empty when missing).`,
+      "Secrets are not pushed here — each app's own `pnpm github:sync` fills its environments (and owns its branches and rulesets).",
     ],
     execute: async () => {
-      // Per-environment: sync only this environment's branch + ruleset + GitHub Environment.
-      await syncGithubFoundations(context.environments);
       const result = await provision(
         context.config,
         context.secrets,
@@ -238,7 +248,7 @@ export const setupGithubProvider: InfraProvider = {
     verifyState: () => ({
       ok: Boolean(context.state.github?.repository),
       message: context.state.github?.repository
-        ? `repository ${context.state.github.repository} verified (branches, rulesets, environments)`
+        ? `repository ${context.state.github.repository} verified (environments)`
         : 'no GitHub repository recorded',
     }),
     verifyLive: async () => {
@@ -282,7 +292,7 @@ export const setupGithubProvider: InfraProvider = {
     const environments = config.environments.map((environment) => environment.name);
     return [
       {
-        provider: 'GitHub (branches, rulesets, environments)',
+        provider: 'GitHub (environments)',
         dashboardUrl: `https://github.com/${repository}/settings/environments`,
         steps: [
           'Settings → Environments → delete each environment listed below.',

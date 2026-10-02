@@ -12,7 +12,8 @@ import {
 
 export { driftResultsHaveIssues } from './environments-util.js';
 
-const ENVIRONMENTS_DIRECTORY = targetPath('.github', 'environments');
+/** The backend's `.github/environments` — resolved on use, so importing never needs the repo. */
+const defaultEnvironmentsDirectory = (): string => targetPath('.github', 'environments');
 
 function getRepositoryIdentifier(): string {
   return resolveRepository();
@@ -39,7 +40,7 @@ export type ValidateGitHubEnvironmentsDriftOptions = {
 };
 
 export function validateGitHubEnvironmentsDrift({
-  environmentsDirectory = ENVIRONMENTS_DIRECTORY,
+  environmentsDirectory = defaultEnvironmentsDirectory(),
   environmentNames,
 }: ValidateGitHubEnvironmentsDriftOptions = {}): GitHubEnvironmentDriftResult[] {
   const repository = getRepositoryIdentifier();

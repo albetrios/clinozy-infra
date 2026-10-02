@@ -11,7 +11,11 @@ import {
 } from '@setup/common/dns-requirements.js';
 import type { SetupConfig } from '@setup/common/types.js';
 import { buildConfig } from '@setup/infra/init-wizard.js';
-import { type NextStepChecks, buildNextSteps } from '@setup/infra/next-steps.js';
+import {
+  type NextStepChecks,
+  buildNextSteps,
+  mergeDnsRequirements,
+} from '@setup/infra/next-steps.js';
 import {
   backendRoleName,
   passwordFromEnvUrl,
@@ -41,6 +45,7 @@ const checks = (overrides: Partial<NextStepChecks> = {}): NextStepChecks => ({
   repositoryIsPrivate: async () => false,
   envValue: (environment, key) =>
     ({
+      DATABASE_URL: `postgresql://acme_be_app:pw@h/db`,
       DATABASE_MAINTENANCE_URL: `postgresql://acme_be_maintenance:pw@h/db`,
       DATABASE_MIGRATION_URL: `postgresql://acme_be_migrator:pw@h/db`,
     })[key] ?? (environment ? undefined : undefined),
@@ -87,22 +92,98 @@ describe('buildNextSteps', () => {
     expect(steps.find((step) => step.title.startsWith('Push the env files'))?.status).toBe('todo');
   });
 
-  it('marks the database users done only with a maintenance URL and the migrator login', async () => {
+  it('marks the database users done only when each URL names its backend role', async () => {
     const done = await buildNextSteps({ config: config(), dnsRecords: records, checks: checks() });
     expect(done.find((step) => step.title.startsWith('Backend database users'))?.status).toBe(
       'done',
     );
-    const bootstrapOnly = await buildNextSteps({
+    const oldRuntimeLogin = await buildNextSteps({
       config: config(),
       dnsRecords: records,
       checks: checks({
-        envValue: (_environment, key) =>
-          key === 'DATABASE_MIGRATION_URL' ? 'postgresql://neondb_owner:pw@h/db' : undefined,
+        envValue: (environment, key) =>
+          key === 'DATABASE_URL'
+            ? `postgresql://${environment}_app_login:pw@h/db`
+            : checks().envValue(environment, key),
       }),
     });
     expect(
-      bootstrapOnly.find((step) => step.title.startsWith('Backend database users'))?.status,
+      oldRuntimeLogin.find((step) => step.title.startsWith('Backend database users'))?.status,
     ).toBe('todo');
+    const providerOwnerMigrations = await buildNextSteps({
+      config: config(),
+      dnsRecords: records,
+      checks: checks({
+        envValue: (environment, key) =>
+          key === 'DATABASE_MIGRATION_URL'
+            ? 'postgresql://neondb_owner:pw@h/db'
+            : checks().envValue(environment, key),
+      }),
+    });
+    expect(
+      providerOwnerMigrations.find((step) => step.title.startsWith('Backend database users'))
+        ?.status,
+    ).toBe('todo');
+  });
+
+  it('lists Stripe keys per environment and flags a test-mode key in production', async () => {
+    const base = config();
+    const stripeConfig: SetupConfig = {
+      ...base,
+      app: { ...base.app, frontendUrl: {} }, // derive the API hosts from product.domain
+      providers: { ...base.providers, stripe: { ...base.providers.stripe, enabled: true } },
+    };
+    const values = (secretKey: (environment: string) => string) =>
+      checks({
+        envValue: (environment, key) =>
+          ({
+            STRIPE_SECRET_KEY: secretKey(environment),
+            STRIPE_WEBHOOK_SECRET: 'whsec_x',
+            STRIPE_PUBLISHABLE_KEY: 'pk_x',
+          })[key],
+      });
+    const stripeStep = async (secretKey: (environment: string) => string) =>
+      (
+        await buildNextSteps({
+          config: stripeConfig,
+          dnsRecords: records,
+          checks: values(secretKey),
+        })
+      ).find((step) => step.title.startsWith('Stripe'));
+
+    const live = await stripeStep((environment) =>
+      environment === 'production' ? 'sk_live_x' : 'sk_test_x',
+    );
+    expect(live?.status).toBe('manual');
+    expect(live?.lines).toContainEqual(
+      expect.stringContaining(
+        'development: https://development--api.acme.test/api/v1/billing/webhook',
+      ),
+    );
+    const testInProduction = await stripeStep(() => 'sk_test_x');
+    expect(testInProduction?.status).toBe('todo');
+    expect(testInProduction?.lines).toContainEqual(
+      expect.stringMatching(/^✗ production: .*sk_live_/),
+    );
+  });
+
+  it('lists the Google redirect URIs and asks for missing client credentials', async () => {
+    const base = config();
+    const googleConfig: SetupConfig = {
+      ...base,
+      providers: {
+        ...base.providers,
+        oauth: { ...base.providers.oauth, google: { enabled: true } },
+      },
+    };
+    const step = (
+      await buildNextSteps({ config: googleConfig, dnsRecords: records, checks: checks() })
+    ).find((entry) => entry.title.startsWith('Register the sign-in callback URLs'));
+    expect(step?.status).toBe('todo');
+    expect(step?.lines).toContainEqual('  production: https://app.acme.test/callback/google');
+    expect(step?.lines).toContainEqual(
+      expect.stringMatching(/^✗ development: OAUTH_GOOGLE_CLIENT_ID/),
+    );
   });
 
   it('raises the attestation decision only for a private backend repository', async () => {
@@ -132,6 +213,21 @@ describe('DNS requirements', () => {
     requireDnsRecord(record);
     requireDnsRecord({ ...record, name: 'DUP.acme.test' });
     expect(collectedDnsRequirements().filter((entry) => entry.value === 'v')).toHaveLength(1);
+  });
+
+  it('forgets saved records that no longer belong to the domain', () => {
+    const stale = { provider: 'Railway', type: 'CNAME', name: 'api.old.test', value: 'x' } as const;
+    expect(mergeDnsRequirements([...records, stale], [], 'acme.test')).toEqual(records);
+  });
+
+  it('keeps saved records a failed provider did not report, and lets fresh values win', () => {
+    const merged = mergeDnsRequirements(records, [
+      { provider: 'Netlify', type: 'CNAME', name: 'APP.acme.test', value: 'new-fe.netlify.app' },
+    ]);
+    expect(merged).toEqual([
+      { provider: 'Netlify', type: 'CNAME', name: 'APP.acme.test', value: 'new-fe.netlify.app' },
+      records[1],
+    ]);
   });
 });
 

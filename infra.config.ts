@@ -5,14 +5,14 @@
  * removes that service from `plan`/`up` without touching the engine or orchestrator.
  *
  * Project identity (org/name/artifacts, environments, app runtime config) lives in
- * `setup.config.json` — not here. See `src/infra/config.ts` for the split.
+ * `setup.config.json` — not here. See `src/infra/infra-config.ts` for the split.
  *
  * Every service is a preset (`src/presets/`):
  *  - validate/guide presets replace their bespoke providers outright;
  *  - managed presets wrap a retained API-orchestrating provider (the "client lib")
  *    and add declarative outputs metadata.
  */
-import { defineInfraConfig } from './src/infra/config.js';
+import { defineInfraConfig } from './src/infra/infra-config.js';
 import {
   awsPreset,
   githubAppWithOauthPreset,

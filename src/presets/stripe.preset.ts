@@ -2,16 +2,17 @@
  * Stripe preset (guide-only).
  *
  * Stripe exposes no API to mint or read API keys, so this preset only prints a Dashboard
- * walkthrough and collects the values you paste, writing them to each `.env.<environment>`.
+ * walkthrough and collects the values — from `.setup/.setup-credentials` (`KEY__<environment>`) or
+ * pasted at the prompt — writing them to each `.env.<environment>`.
  * No Stripe API calls are made.
  */
 import type { GuidePreset } from './types.js';
 
 const API_KEYS_URL = 'https://dashboard.stripe.com/apikeys';
-const WEBHOOK_PATH = '/api/v1/billing/webhook';
+export const STRIPE_WEBHOOK_PATH = '/api/v1/billing/webhook';
 
 /** The exact event set the billing webhook handler consumes (add these when creating the endpoint). */
-const WEBHOOK_EVENTS = [
+export const STRIPE_WEBHOOK_EVENTS = [
   'customer.created',
   'customer.updated',
   'customer.subscription.created',
@@ -32,7 +33,7 @@ export const stripePreset: GuidePreset = {
     detail: 'Guide only — create keys + webhook in the Dashboard, paste per env',
     url: API_KEYS_URL,
     configKey:
-      '.env.<environment> → STRIPE_SECRET_KEY / STRIPE_PUBLISHABLE_KEY / STRIPE_WEBHOOK_SECRET',
+      '.setup-credentials → STRIPE_SECRET_KEY / STRIPE_PUBLISHABLE_KEY / STRIPE_WEBHOOK_SECRET __<environment>',
   },
   settingsDetail: 'guide + paste keys/webhook per env file',
   perEnv: true,
@@ -40,8 +41,8 @@ export const stripePreset: GuidePreset = {
   steps: [
     'Open the Stripe dashboard → Developers → API keys (use a Sandbox for development).',
     'Copy the Secret key (sk_…) and the Publishable key (pk_…).',
-    'Developers → Webhooks → Add endpoint at <api>/api/v1/billing/webhook, then copy its Signing secret (whsec_…).',
-    'Paste STRIPE_SECRET_KEY / STRIPE_PUBLISHABLE_KEY / STRIPE_WEBHOOK_SECRET into .env.<env>.',
+    'Workbench → Webhooks → Create an event destination at <api>/api/v1/billing/webhook, then Reveal secret (whsec_…).',
+    'Put STRIPE_SECRET_KEY / STRIPE_PUBLISHABLE_KEY / STRIPE_WEBHOOK_SECRET in .setup/.setup-credentials as KEY__<env>.',
   ],
   describe: ({ environments }) => ({ environments }),
   outputs: [
@@ -50,18 +51,18 @@ export const stripePreset: GuidePreset = {
     { key: 'STRIPE_WEBHOOK_SECRET', description: 'Stripe webhook signing secret' },
   ],
   instructions: [
-    'No Stripe API calls are made and nothing is read from .env — this step only guides you and saves what you paste.',
+    'No Stripe API calls are made and nothing is read from .env — this step only guides you and saves the keys you give it.',
     'development: Stripe Dashboard → account picker → Sandboxes → create a sandbox → Developers → API keys → copy sk_test_/pk_test_.',
     'production: live Dashboard → Developers → API keys → copy sk_live_/pk_live_.',
-    `webhook: Dashboard → Developers → Webhooks → Add endpoint → URL <public API URL>${WEBHOOK_PATH}; select events: ${WEBHOOK_EVENTS.join(', ')}; then copy the Signing secret (whsec_…).`,
-    `local dev: \`stripe listen --forward-to localhost:3000${WEBHOOK_PATH}\` prints a whsec_ to use.`,
-    'Paste STRIPE_SECRET_KEY / STRIPE_PUBLISHABLE_KEY / STRIPE_WEBHOOK_SECRET per environment when prompted → each .env.<environment>.',
+    `webhook (in the sandbox for development, live mode for production): Workbench → Webhooks → Create an event destination → Your account → API version = the backend's STRIPE_API_VERSION (clinozy-be src/infrastructure/payment/stripe.client.ts) → events: ${STRIPE_WEBHOOK_EVENTS.join(', ')} → Webhook endpoint → URL <public API URL>${STRIPE_WEBHOOK_PATH} → Reveal secret (whsec_…).`,
+    `local dev: \`stripe listen --forward-to localhost:3000${STRIPE_WEBHOOK_PATH}\` prints a whsec_ to use.`,
+    'Put STRIPE_SECRET_KEY / STRIPE_PUBLISHABLE_KEY / STRIPE_WEBHOOK_SECRET per environment in .setup/.setup-credentials as KEY__<environment> (or paste them when prompted) → setup writes each .env.<environment>.',
     'You can configure one environment at a time — skip development or production if not ready yet.',
   ],
   guide: {
     scope: 'per-environment',
-    guideError: 'guide-only — enter keys + webhook secret manually in .env.<environment>',
-    summaryLine: 'Stripe: keys + webhook secret saved to .env.<environment>',
+    guideError: 'guide-only — set STRIPE_*__<environment> in .setup/.setup-credentials',
+    summaryLine: 'Stripe: keys + webhook secret written to .env.<environment>',
     fields: [
       {
         key: 'STRIPE_SECRET_KEY',
@@ -86,10 +87,10 @@ export const stripePreset: GuidePreset = {
         provider: 'Stripe',
         dashboardUrl: 'https://dashboard.stripe.com/webhooks',
         steps: [
-          `Developers → Webhooks → open the endpoint at <your-url>${WEBHOOK_PATH} → Delete.`,
+          `Workbench → Webhooks → open the destination for <your-url>${STRIPE_WEBHOOK_PATH} → ⋯ → Delete.`,
           'Delete the sandbox (Dashboard account picker → Sandboxes → ⋯ → Delete) if no longer needed.',
         ],
-        resources: [{ label: 'Webhook path', identifier: WEBHOOK_PATH }],
+        resources: [{ label: 'Webhook path', identifier: STRIPE_WEBHOOK_PATH }],
       },
     ];
   },

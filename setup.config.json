@@ -82,11 +82,11 @@
       "fromName": "Clinozy"
     },
     "stripe": {
-      "enabled": false
+      "enabled": true
     },
     "oauth": {
       "google": {
-        "enabled": false
+        "enabled": true
       },
       "github": {
         "enabled": true

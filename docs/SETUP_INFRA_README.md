@@ -1,175 +1,185 @@
-# Setup / Infra (`tooling/setup`)
+# Setup / Infra — reference
 
-One declarative, config-driven engine provisions every third-party. There is **no**
-per-provider script — all third-party setup flows through `pnpm setup:infra` and the
-provider registry. It follows a plan → apply pattern (human-only, interactive).
+One command, `pnpm setup:infra`, provisions every third-party service for the backend
+(`../clinozy-be`) and the frontend (`../clinozy-fe`) and writes each app's `.env.<environment>`.
+There is no per-provider script: every service is a preset run by the same engine, plan → apply,
+interactive by default (`--yes` for an unattended run).
 
-| Concept            | Where it lives                                                              |
-| ------------------ | -------------------------------------------------------------------------- |
-| Declarative config | `tooling/setup/setup.config.json` (which providers + environments)         |
-| State              | **Ephemeral — in-memory only** (`common/state.ts`); never written to disk  |
-| Secret variables   | `.setup/.setup-credentials` (tokens; gitignored)                           |
-| Secret template    | `.setup-credentials.example` (committed, at repo root next to `.env.example`) |
-| Plan / apply       | `pnpm setup:infra:plan` / `pnpm setup:infra`                              |
-| Providers          | `tooling/setup/infra/providers/setup-<key>/setup-<key>.provider.ts`        |
+## How a run works
 
-> **State is ephemeral.** There is **no `.setup-state.json`** — provisioned resource ids/urls
-> and write-once secrets live only in an in-memory object for the lifetime of a single
-> `pnpm setup:infra` run (provider → state → `.env.<environment>` writer, all in-process).
-> The durable record is the `.env.<environment>` files plus each provider's own dashboard.
-> Standalone commands hydrate state from **live remote** (each provider's `detectRemote`)
-> when they need it.
->
-> **Where setup files live.** The credentials file (`.setup/.setup-credentials`) and the
-> clipboard-reveal audit log (`.setup/.setup-state.audit.log`) live in the gitignored
-> **`.setup/`** directory, separate from the app's `.env.<environment>` config. The only
-> committed, root-level setup file is the template `.setup-credentials.example` (next to
-> `.env.example`). Copy it to `.setup/.setup-credentials` and fill it — or run
-> `pnpm setup:infra:init`, which creates the directory and file for you.
+```
+ 1. Identity review      setup.config.json — names, environments, product.domain
+ 2. Prerequisites        1/4 tools · 2/4 logins (GitHub, Railway, Netlify) · 3/4 config + repos
+                         · 4/4 credentials — also on its own: pnpm setup:infra:prereqs
+ 3. Credentials          asks once for each value missing from .setup/.setup-credentials
+                         (one line with its link, hidden input) and saves it there
+ 4. Settings review      what will be created / validated → confirm
+ 5. Pre-flight           adopts what already exists remotely (nothing is recreated)
+ 6. Provisioning         every provider for development, then for production
+ 7. Finalize             writes ../clinozy-be/.env.<env> and ../clinozy-fe/.env.<env>
+                         (only provisioned keys; other keys untouched; retired keys removed)
+ 8. Summary + checklist  numbered "Next steps" with live checks — `pnpm setup:infra:next` re-prints it
+```
 
-To add a provider, see **[SETUP_INFRA_PROVIDER_TEMPLATE.md](./SETUP_INFRA_PROVIDER_TEMPLATE.md)**.
+| What | Where |
+| --- | --- |
+| Identity (names, environments, `product.domain`, which providers are on) | `setup.config.json` |
+| Resources (ordered list of presets) | `infra.config.ts` |
+| Your credentials (tokens; per-environment Stripe/Google as `KEY__<environment>`) | `.setup/.setup-credentials` — gitignored, `0600`, created on the first run |
+| State | **In memory only** for one run (`src/common/state.ts`); standalone commands re-read it from the providers |
+| Outputs | each app's `.env.<environment>` |
+| Checklist DNS records (public values) | `.setup/next-steps.json` |
+| Clipboard-copy audit (key + env + time, never values) | `.setup/.setup-state.audit.log` |
+
+What you must provide, the database users, and the derived hosts:
+**[SETUP_INFRA_PREREQUISITES.md](./SETUP_INFRA_PREREQUISITES.md)**.
 
 ## Providers (registry)
 
-Registered in [`infra/providers/index.ts`](./infra/providers/index.ts) — the orchestrator
-iterates this list and treats each one uniformly (preview → settings-review →
-detect-existing → interactive step → check → delete-instructions).
+Composed in [`infra.config.ts`](../infra.config.ts) and resolved by
+[`src/infra/providers/index.ts`](../src/infra/providers/index.ts); the orchestrator treats each one
+uniformly (preview → settings review → detect existing → interactive step → check → delete guide).
 
 `neon` · `aws` · `sentry` · `jwt` · `resend` · `stripe` · `google-oauth` · `github-app-with-oauth` · `netlify` ·
 `posthog` · `turnstile` · `railway` · `railway-redis` · `github` · `postman` · `scalar`
 
-Enable/disable each in `setup.config.json` (`providers.<key>.enabled`). Fill its tokens in
-`.setup/.setup-credentials` (run `pnpm setup:infra:preview` to see exactly which keys each needs).
+Turn each on or off in `setup.config.json` (`providers.<key>.enabled`).
 
 ## Quick start
 
 ```bash
-pnpm setup:infra:init       # generate setup.config.json + .setup/.setup-credentials template (interactive)
-# → fill tokens in .setup/.setup-credentials  (which keys + where: SETUP_INFRA_PREREQUISITES.md)
-pnpm setup:infra:preview    # token checklist: providers, where to get each key
-pnpm setup:infra:plan       # diff: what exists vs what will be created/updated (read-only)
-pnpm setup:infra            # apply — shows the plan, then walks step-wise (interactive, human-only)
+pnpm setup:infra:init       # first time: write setup.config.json (interactive)
+pnpm setup:infra:plan       # read-only: what exists vs what would be created
+pnpm setup:infra            # apply — asks for missing credentials, then provisions step by step
+pnpm setup:infra:next       # re-print the "Next steps" checklist (no provisioning)
 ```
 
-Run a **single** provider (replaces the old per-provider scripts):
+Scope a run to some providers:
 
 ```bash
-pnpm setup:infra --providers posthog
-pnpm setup:infra --providers turnstile,oauth,stripe
-# or via env: SETUP_INFRA_PROVIDERS=neon,jwt,github   /   SETUP_INFRA_SKIP_PROVIDERS=postman
+pnpm setup:infra --providers neon,stripe          # or -r neon,stripe
+SETUP_INFRA_PROVIDERS=neon pnpm setup:infra --yes  # SETUP_INFRA_SKIP_PROVIDERS=postman skips instead
 ```
 
-## Idempotent by default — present? update or skip; absent? create
+## Idempotent by default
 
-Every provider step checks whether its resource (organization / project / environment-scoped
-resource) already exists before doing anything:
+Every step checks what already exists before acting:
 
-- **Absent** → it is **created**.
-- **Present** → setup prints `Already present — …` and **asks `(u)pdate / (s)kip`** (default **skip**). Skip keeps what's there; update re-runs the step.
-- **Non-interactive** (`--yes` / CI) → existing resources are **always skipped** — setup never mutates existing infrastructure unprompted.
+- **Absent** → created.
+- **Present** → `Already present — …`, then `(u)pdate / (s)kip` (default skip). Under `--yes` existing
+  resources are always skipped — setup never changes existing infrastructure unprompted.
+- **Neon database users** follow the same rule per user: kept when the saved password still logs in;
+  otherwise created or given a login. A user that is in use is never given a new password without
+  `--force`, and old users are reported with the SQL to drop them — never deleted.
 
-Detection uses the in-memory state for the current run (hydrated from live remote via each
-provider's `detectRemote` during the pre-flight reconstruct); remote existence is also surfaced
-in `setup:infra:preview` / `detectExisting()`. Validate-only providers (google-oauth, resend) create
-nothing, so they simply re-validate each run. `github-app-with-oauth` creates a GitHub App (manifest
-flow), `stripe` provisions the webhook (and can auto-create a dev sandbox), and `turnstile` creates a
-widget — these provision real resources rather than only validating.
+Guide providers (`stripe`, `google-oauth`) and validate providers (`resend`) create nothing — they
+collect or check values each run. `github` creates any missing GitHub Environment in both app repos
+(never touching an existing one; branches and rulesets stay with each app's own `github:sync`),
+`github-app-with-oauth` creates a GitHub App (manifest flow), `turnstile` creates a widget per
+environment, `netlify` finds or creates the frontend site.
 
-## All scripts
+## Scripts
 
-### Provision / inspect (`tooling/setup/setup.ts`)
+| Script | Action |
+| --- | --- |
+| `setup:infra` | Apply. `--yes`/`-y` = unattended (never prompts); `--force` re-collects values that are already set and allows re-keying a database user that is in use |
+| `setup:infra:init` | Interactive wizard → `setup.config.json` (and the credentials template) |
+| `setup:infra:plan` | Read-only diff per provider; `--remote` (or `setup:infra:inspect`) for live truth |
+| `setup:infra:inspect` | Live remote inspection: present/absent + config-vs-remote field diff |
+| `setup:infra:preview` | Token checklist: providers, where to get each key (no writes) |
+| `setup:infra:next` | The "Next steps" checklist with live checks (DNS, GitHub secrets, DB users, …) |
+| `setup:infra:prereqs` | The prerequisites check on its own: tools, logins, config, credentials |
+| `setup:infra:doctor` | Config footguns (missing domain, wrong URLs, …) |
+| `setup:infra:check` / `setup:infra:status` | Health check / per-environment status matrix |
+| `setup:infra:output` | Masked env inventory; `--copy <KEY>` puts one value on the clipboard |
+| `setup:infra:export-env` / `:export-env:fe` | Re-write the apps' `.env.<environment>` from live state |
+| `setup:infra:reconstruct` | Rebuild in-memory state from the providers (runs inside apply too) |
+| `setup:infra:guide` | Generate `setup-guide.html` (gitignored) — a browser view of the catalog with live status |
+| `setup:infra:example` · `setup:infra:vault` | Print a generated `.env.example` · mirror into KeyStash (off by default) |
+| `setup:infra:delete` | Print the **manual** delete guide — setup never deletes resources |
+| `setup:github` / `github:sync` (`:check`, `:dry-run`, `:status`) | Backend repo only (from `providers.github.repository`): branches, rulesets, Environments; push `.env.<env>`. Prefer each app's own `pnpm github:sync`, which the checklist uses |
+| `setup:domain` | Attach a Railway custom domain by hand (`src/railway/custom-domain.ts`) |
+| `rebrand` · `validate:identity` · `identity:sync` | Rename the product / check identity drift (see [README](../README.md)) |
+| `health` | Lint, typecheck, tests, identity — every phase, one summary |
 
-| Script                       | Action                                                            |
-| ---------------------------- | ---------------------------------------------------------------- |
-| `setup:infra`                | Apply: show the plan, then provision step-wise (interactive). Add `--yes`/`-y` for non-interactive mode — auto-continues every step (skips on failure, no TTY required) after the settings review |
-| `setup:infra:init`           | Interactive wizard → writes config + `.setup/.setup-credentials` template      |
-| `setup:infra:preview`        | Token checklist: providers, token URLs, config keys (no writes) |
-| `setup:infra:plan`           | Diff (config + in-memory state): CREATE / UP-TO-DATE / UPDATE / VALIDATE per provider (read-only). Pass `--remote`, or use `setup:infra:inspect`, for live truth |
-| `setup:infra:inspect`        | Remote inspection: per provider, present/absent + config-vs-remote field diff (project/env/branch/region/org) |
-| `setup:infra:output`         | Masked env inventory per environment — **secrets never printed** (`--copy <KEY>` copies one to the clipboard; `--environment <env>` to filter) |
-| `setup:infra:reconstruct`    | Hydrate the in-memory state from live remote resources (pre-flight inside apply)          |
-| `setup:infra:export-env`     | Regenerate `.env.<environment>` for clinozy-be **and** `../clinozy-fe/.env.<environment>` (browser-safe Vite keys) from state |
+## Security — how secrets are kept safe
 
-> The bare non-infra aliases (`setup:all`, `setup:provision`, `setup:init`, `setup:preview`, `setup:dry-run`, `setup:status`, `setup:reconstruct`) were removed — use the `setup:infra*` forms above. Raw flags still work: `tsx tooling/setup/setup.ts --output|--status|--dry-run|…`.
+- **Never printed.** Providers log status only (`valid`, `created`, `left unchanged`); errors are
+  redacted (`redactSecrets` in `src/common/setup-fetch.ts`); `setup:infra:output` masks values, and
+  connection strings are masked by value, not only by key name.
+- **Clipboard, not terminal.** `setup:infra:output --copy <KEY>` copies one value, auto-clears it
+  after 30 s (`--clear <seconds>`), and records the copy in the audit log — key, env, time, never the
+  value.
+- **Files.** `.setup/` and `.env.*` (except `*.example`) are gitignored; credential files are written
+  owner-only (`0600`). Database users are created by SQL as the provider's owner (never Neon's REST
+  API, which grants BYPASSRLS), and runtime users are checked to stay subject to row-level security.
+- **Not in this repo yet:** a pre-commit secret scan and CI. Run `pnpm health` before pushing, and
+  never `git add -f` anything under `.setup/`.
 
-### Infra subcommands (`tooling/setup/setup.ts`)
+Every provider starts with the standard header (name · description · NAMING source · SECRETS rule) —
+see [SETUP_INFRA_PROVIDER_TEMPLATE.md](./SETUP_INFRA_PROVIDER_TEMPLATE.md).
 
-| Script                  | Action                                                       |
-| ----------------------- | ----------------------------------------------------------- |
-| `setup:infra:check`     | Health-check provisioned providers                          |
-| `setup:infra:status`    | Per-environment resource status (offline; from local state) |
-| `setup:infra:delete`    | Print the **manual** delete guide (setup never deletes resources itself) |
+## Architecture and file map
 
-### Env files
+```
+ setup.config.json (identity) ─┐
+ infra.config.ts (resources) ──┼─► orchestrator ─► providers (presets) ─► in-memory state ─► .env writers
+ .setup/.setup-credentials ────┘        │                                                  ├─► ../clinozy-be/.env.<env>
+                                        └─► next steps (live checks)                       └─► ../clinozy-fe/.env.<env>
+```
 
-Writing `.env.<environment>` into clinozy-be **and** clinozy-fe (independent targets) is handled by
-`setup:infra:export-env` (see the table above). The full `setup:infra` run also exports as a
-finalize step, so there is no separate env command.
+Preset kinds (`src/presets/types.ts`): **validate** (check a pasted credential — Resend), **guide**
+(dashboard walkthrough + per-environment values — Stripe, Google), **managed** (a thin preset over a
+retained API client — Neon, AWS, Railway, Sentry, …). Authoring rules: the `preset-author` skill.
 
-### GitHub repo / environment secrets (`tooling/setup/github/`)
+| Area | Files |
+| --- | --- |
+| Entry point + flags | `src/setup.ts` |
+| Orchestrator, guide, checklist | `src/infra/orchestrator.ts`, `src/infra/guide.ts`, `src/infra/next-steps.ts` |
+| Config + init | `src/common/config.ts` (setup.config.json schema), `src/infra/init-wizard.ts`, `src/infra/infra-config.ts` (`defineInfraConfig`) |
+| Credentials | `src/common/secrets.ts` (template, per-environment keys, `TOKEN_URLS`) |
+| State | `src/common/state.ts` |
+| Presets | `src/presets/` (`types.ts`, `managed.presets.ts`, `*.preset.ts`, `lint.ts`) |
+| Providers (API clients) | `src/infra/providers/setup-<key>/setup-<key>.provider.ts` |
+| Engine (vendored from envforge) | `src/engine/` — generic providers, surgical `.env` upsert |
+| Env writers | `src/envs/` (`build-env-vars.ts`, `export-env-files.ts`, `frontend-env-keys.ts`) |
+| Derived hosts (`product.domain`) | `src/envs/env-file-setup.util.ts` |
+| DNS records reported by providers | `src/common/dns-requirements.ts` |
+| Prerequisites | `src/infra/prerequisites.ts` |
+| Output / clipboard | `src/infra/output.ts`, `src/common/clipboard.ts` |
+| GitHub | `src/github/` · Railway API: `src/railway/` · Identity / rebrand: `src/identity/` |
+| Browser guide | `src/infra/setup-guide/` |
+| Tests | `src/tests/unit/**` |
 
-| Script                  | Action                                                          |
-| ----------------------- | -------------------------------------------------------------- |
-| `setup:github` / `github:sync` | Scaffold repo, branches, rulesets, Environments; push `.env.<env>` |
-| `setup:github:check`    | Consistency + remote drift (read-only)                         |
-| `setup:github:dry-run` / `github:sync:dry-run` | Preview the sync                              |
-| `setup:github:status`   | Repo / environment secret status                              |
+## Decisions (settled)
 
-### Domain & misc
+- **State is ephemeral** — no state file; standalone commands re-read from the providers.
+- **Every service is a preset**; heavy ones keep their API client behind a thin `managed` preset.
+- **`.env.example` seeds a first-run env file only** — existing files are upserted, never regenerated.
+- **Secrets: never printed; copy-only with auto-clear.** No output mode dumps values.
+- **Everything is derived from config** (`setup.config.json` + `infra.config.ts`) — names and hosts are
+  never hard-coded.
+- **Migrations run in the backend's deploy**, never in setup.
 
-| Script                                | Action                                            |
-| ------------------------------------- | ------------------------------------------------- |
-| `setup:domain` / `setup:infra:domain` | Attach a Railway custom domain (`railway/custom-domain.ts`) |
-| `setup:retention-secrets` / `setup:push-retention-secrets` | Push retention worker secrets |
-| `setup:local`                         | Local-only dev bootstrap (`tooling/dev/setup-local.ts`; not a third-party) |
+## Known limitations
 
-## Security — secrets never leak (enforced)
+- `JWT_SECRET` and each environment's `RAILWAY_TOKEN` are minted fresh on every full run — run each
+  app's `pnpm github:sync` afterwards so GitHub/Railway match.
+- Neither GitHub (a GitHub App's callback URLs) nor Google (OAuth redirect URIs) has an API for
+  registering them — the checklist prints the exact URLs to add by hand.
+- A database first migrated by a different user than `<project>_migrator` keeps that user's default
+  privileges (the backend's own local setup behaves the same way).
 
-Secrets are written to **`.env.<environment>` only** (via provisioning / `setup:infra:export-env`) and never printed to the terminal or committed. This is enforced, not just convention:
+## Reuse in another product
 
-- **One home for secrets.** Secret values are only ever written to `.env.<environment>` (by provisioning / `setup:infra:export-env`). For normal setup you never copy/paste — values land in the env file automatically.
-- **Never printed.** Providers log status only (`valid` / `resolved`), never a value. `setup:infra:output` shows a masked inventory (`••••`); no secret is ever written to stdout. Connection strings with embedded credentials (`DATABASE_URL`, `REDIS_URL`) are masked by value, not just key name.
-- **Clipboard, not terminal.** Need one value elsewhere (e.g. a third-party dashboard)? `setup:infra:output --copy <KEY>` puts it on the **system clipboard** (auto-cleared after ~20s) and prints only a confirmation — it never enters the terminal or an agent transcript. Each copy is recorded to the gitignored `.setup/.setup-state.audit.log` (key + env + timestamp, never the value). No clipboard tool → it refuses and points you at `.env.<environment>`.
-- **Unreadable by the agent.** The `guardrails.mjs` PreToolUse hook **denies the agent** Read/Bash access to `.env.<env>`, `.setup/.setup-credentials`, and any `.setup-state.*` file (templates `*.example` stay readable). So secrets are out of reach even though the files sit on disk.
-- **Can't be committed.** `.env*` (except `*.example`) and `.setup-state.*` are gitignored; pre-commit runs **gitleaks `protect --staged`** plus a **"No secret/state files staged"** guard that blocks even `git add -f`. Both also run in CI.
-
-> Note: state is **ephemeral (in-memory, never written to disk)** — there is no `.setup-state.json`. The only `.setup-state.*` file is the gitignored clipboard-reveal audit log (`.setup/.setup-state.audit.log`, key + env + timestamp, never values). The deny-read / gitignore / pre-commit guards still cover the whole `.setup-state.*` pattern defensively.
-
-Every provider starts with a standard header (name · description · NAMING source · SECRETS rule). When adding a provider, follow the same header + rules — see the template's security section.
-
-## File map
-
-| Area                 | Files                                                            |
-| -------------------- | --------------------------------------------------------------- |
-| Config & init        | `common/config.ts`, `infra/init-wizard.ts`, `setup.config.json` |
-| Secrets (`.setup/.setup-credentials`) | `common/secrets.ts`                                          |
-| State                | `common/state.ts` (ephemeral in-memory singleton; no file on disk) |
-| Secret output viewer | `infra/output.ts` + `common/clipboard.ts` (`setup:infra:output --copy`) |
-| Agent deny-read      | `agent-os/hooks/guardrails.mjs` (blocks Read/Bash of secret files) |
-| Orchestrator         | `infra/orchestrator.ts` (registry-driven)                      |
-| Guide                | `infra/guide.ts`                                               |
-| Prerequisites        | `infra/prerequisites.ts`                                       |
-| Providers            | `infra/providers/setup-<key>/setup-<key>.provider.ts`, `infra/providers/index.ts` |
-| Env-var emission     | `envs/build-env-vars.ts`                                       |
-| Docs                 | `docs/deployment/setup/setup-token-instructions.md`           |
-
-## Lift into a new product
-
-This module is config-driven and standalone — to reuse it in another product:
-
-1. Copy `tooling/setup/` into the new repo and add the `setup:infra*` scripts to its `package.json`.
-2. Run `pnpm setup:infra:init` to generate that product's `setup.config.json` (its own
-   organization / project / environment names — the single source of truth) and `.setup/.setup-credentials`.
-3. Trim `setup.config.json` providers to the ones the product uses.
-
-The provisioning **engine** (`common/`, `infra/`, `infra/providers/`) has no `@/` (app)
-imports, so it ports cleanly. The tool does not read either product's `env-schema` — the env
-schema is each project's own property. `clinozy-infra` only writes provisioned values into each
-target's `.env.<environment>` (clinozy-be and clinozy-fe, treated as independent repos).
+The tool is standalone (no imports from the apps). Copy the repo, point it at your apps
+(`CLINOZY_BE_DIR` / `target.path`, `CLINOZY_FE_DIR` / `frontend.path`), run `pnpm rebrand "<Product>"`,
+then `pnpm setup:infra:init` and trim the providers in `setup.config.json`. The tool never reads either
+app's env schema — it only writes provisioned values into their `.env.<environment>`.
 
 ## See also
 
-- **[SETUP_INFRA_PREREQUISITES.md](./SETUP_INFRA_PREREQUISITES.md)** — which credentials you must obtain per provider + where to get them.
-- **[SETUP_INFRA_PROVIDER_TEMPLATE.md](./SETUP_INFRA_PROVIDER_TEMPLATE.md)** — add a new provider.
-- `docs/deployment/setup/setup-token-instructions.md` — where to get each token.
-- `.claude/skills/setup-infra-maintainer/SKILL.md` — the agent checklist (run when adding/removing a provider).
+- **[SETUP_INFRA_PREREQUISITES.md](./SETUP_INFRA_PREREQUISITES.md)** — what to provide, database users, hosts.
+- **[SETUP_INFRA_PROVIDER_TEMPLATE.md](./SETUP_INFRA_PROVIDER_TEMPLATE.md)** — add a provider.
+- **[envforge-convergence.md](./envforge-convergence.md)** — why the engine is vendored.
+- Agent skills: `.claude/skills/setup-infra-maintainer`, `.claude/skills/preset-author`.

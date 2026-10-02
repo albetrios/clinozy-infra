@@ -1,7 +1,60 @@
 # clinozy-infra
 
-Standalone infrastructure-provisioning tool (`setup:infra`) for the **clinozy-be** application repo.
-Extracted from `clinozy-be/tooling/setup/` so infra provisioning can evolve independently.
+Standalone provisioning tool for the **clinozy-be** (backend) and **clinozy-fe** (frontend) repos:
+one command, `pnpm setup:infra`, sets up every third-party service (Neon, Railway, Netlify, Sentry,
+AWS, Resend, PostHog, Turnstile, Stripe, Google/GitHub sign-in, Postman, Scalar, GitHub) for each
+environment and writes each app's `.env.<environment>`. Extracted from `clinozy-be/tooling/setup/`
+so provisioning can evolve independently.
+
+## Prerequisites — once per machine
+
+Do these in order; `pnpm setup:infra:prereqs` checks all of them (every run also starts with it).
+
+1. **Tools**
+   - Node ≥ 24.15 and pnpm ≥ 11.1.1 — the strictest minimums across all three repos; the check fails
+     below them and warns when the repos' pinned versions (`.nvmrc`, `packageManager`) differ.
+     `nvm install 24 && nvm use 24` · `corepack enable` (this repo pins `pnpm@11.1.1`)
+   - GitHub CLI — `brew install gh` · Railway CLI — `brew install railway`
+2. **Repos** — clone `clinozy-infra`, `clinozy-be` and `clinozy-fe` side by side, then `pnpm install` in
+   each (setup runs the backend's own scripts and writes both apps' env files).
+3. **Logins**
+   - Netlify — `npx netlify-cli login` (opens the browser). Netlify is used through this login only.
+   - GitHub — `GITHUB_TOKEN` in `.setup/.setup-credentials`, or `gh auth login`. A fine-grained
+     [token](https://github.com/settings/tokens) needs, on **both** app repos: Administration and
+     Environments (read & write) — setup creates their GitHub Environments — and Secrets (read). It
+     also becomes the apps' `RELEASE_PLEASE_TOKEN` (Contents + Pull requests write). The check verifies
+     the login can manage both repos' environments.
+   - Railway — `RAILWAY_API_TOKEN` in `.setup/.setup-credentials` ([create one](https://railway.com/account/tokens)),
+     or `railway login`.
+   A missing GitHub or Railway token is asked for during the check.
+4. **Config** — `setup.config.json` (committed): names, environments, `product.domain`, which
+   providers are on. Edit it only to change those; every host is derived from `product.domain`.
+5. **Credentials** — nothing to prepare: `pnpm setup:infra` asks once for each value missing from
+   `.setup/.setup-credentials` (one line with its link, hidden input) and saves it.
+
+```bash
+pnpm setup:infra:prereqs       # 1/4 tools · 2/4 logins · 3/4 config · 4/4 credentials — all ✓?
+```
+
+## Quick start
+
+```bash
+pnpm setup:infra:plan          # read-only: what exists vs what would be created
+pnpm setup:infra               # prerequisites → asks for missing credentials → provisions → checklist
+pnpm setup:infra:next          # what is left to do by hand, with live checks
+```
+
+Every credential and what gets created: [docs/SETUP_INFRA_PREREQUISITES.md](docs/SETUP_INFRA_PREREQUISITES.md).
+
+## Docs
+
+| Doc | For |
+| --- | --- |
+| [SETUP_INFRA_PREREQUISITES.md](docs/SETUP_INFRA_PREREQUISITES.md) | Preparing a machine, every credential and where to get it, database users, derived hosts |
+| [SETUP_INFRA_README.md](docs/SETUP_INFRA_README.md) | How a run works, all scripts, security, architecture and file map, known limitations |
+| [SETUP_INFRA_PROVIDER_TEMPLATE.md](docs/SETUP_INFRA_PROVIDER_TEMPLATE.md) | Adding a provider |
+| [envforge-convergence.md](docs/envforge-convergence.md) | Why the provisioning engine is vendored from envforge |
+| `.claude/skills/` (`setup-infra-maintainer`, `preset-author`) | Checklists for agents changing providers or presets |
 
 ## Roots
 
@@ -44,9 +97,9 @@ CLINOZY_BE_DIR=/path/to/clinozy-be pnpm setup:infra:status
 
 ## Notes / gotchas
 
-- **`setup.config.json` is duplicated** — a copy lives here (tool root) and one stays in clinozy-be
-  (`tooling/setup/setup.config.json`, read by clinozy-be's `project-identity` codegen). Keep them in
-  sync; `setup:infra:init` can refresh the target's copy.
+- **`setup.config.json` has copies in the apps** — the one here drives provisioning; clinozy-be and
+  clinozy-fe each keep their own `tooling/setup/setup.config.json` (read by their identity codegen).
+  `pnpm validate:identity` fails when the apps' identity disagrees with this one.
 - **The docs providers write into the target repo.** The Scalar/Postman providers run
   `pnpm docs:*` inside `../clinozy-be`, so the target repo's dependencies must be installed.
 - **clinozy-be and clinozy-fe are independent env targets.** Provisioning writes/overwrites the provisioned
@@ -57,7 +110,7 @@ CLINOZY_BE_DIR=/path/to/clinozy-be pnpm setup:infra:status
 ## Scripts
 
 `pnpm setup:infra[:*]` (incl. `setup:infra:export-env`), `pnpm github:sync`, `pnpm setup:github[:*]`,
-`pnpm validate:github-environments`, `pnpm setup:{domain,retention-secrets}`.
+`pnpm validate:github-environments`, `pnpm setup:domain`.
 Dev: `pnpm health` (lint, typecheck, tests, identity — every phase, one summary), `pnpm lint[:fix]`,
 `pnpm format`, `pnpm typecheck`, `pnpm test`.
 

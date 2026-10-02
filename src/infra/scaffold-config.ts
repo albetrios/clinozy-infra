@@ -21,7 +21,7 @@ export function renderInfraConfigTs(presets: readonly Preset[]): string {
     ' * Edit this file to add/remove/reorder a provisioned service — deleting a line',
     ' * removes it from plan/up. Project identity lives in setup.config.json.',
     ' */',
-    "import { defineInfraConfig } from './src/infra/config.js';",
+    "import { defineInfraConfig } from './src/infra/infra-config.js';",
     'import {',
     ...names.map((n) => `  ${n},`),
     "} from './src/presets/index.js';",

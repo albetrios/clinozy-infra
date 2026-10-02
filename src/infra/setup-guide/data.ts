@@ -89,7 +89,7 @@ function stepsFor(
     return [
       open,
       'Create the resource — one per environment.',
-      `Copy the values and paste ${service.outputs.join(' / ')} into .env.<env>.`,
+      `Put ${service.outputs.join(' / ')} in ${credsFile} as KEY__<env> (or paste them when setup asks) — setup writes each .env.<env>.`,
     ];
   }
   return [

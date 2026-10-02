@@ -3,7 +3,7 @@
  * A fake fetch stands in for the Netlify API; names are invented.
  */
 import { describe, expect, it } from 'vitest';
-import { netlifyTokenFromCliConfig } from '@setup/common/secrets.js';
+import { netlifyTokenFromCliConfig, withoutRetiredEnvSetupKeys } from '@setup/common/secrets.js';
 import type { SetupConfig } from '@setup/common/types.js';
 import { buildConfig } from '@setup/infra/init-wizard.js';
 import {
@@ -140,5 +140,30 @@ describe('netlifyTokenFromCliConfig', () => {
   it('returns nothing for a logged-out or unreadable config', () => {
     expect(netlifyTokenFromCliConfig(JSON.stringify({ users: {} }))).toBe('');
     expect(netlifyTokenFromCliConfig('not json')).toBe('');
+  });
+});
+
+describe('retired .setup-credentials keys', () => {
+  it('drops NETLIFY_AUTH_TOKEN and its comment line, keeping everything else', () => {
+    const before = [
+      '# https://resend.com/api-keys',
+      'RESEND_API_KEY=re_x',
+      '',
+      '# https://app.netlify.com/user/applications#personal-access-tokens',
+      'NETLIFY_AUTH_TOKEN=abc',
+      '',
+      'SCALAR_API_KEY=y',
+    ].join('\n');
+    const result = withoutRetiredEnvSetupKeys(before);
+    expect(result.removed).toEqual(['NETLIFY_AUTH_TOKEN']);
+    expect(result.content).toBe(
+      ['# https://resend.com/api-keys', 'RESEND_API_KEY=re_x', '', '', 'SCALAR_API_KEY=y'].join(
+        '\n',
+      ),
+    );
+  });
+
+  it('leaves a file without retired keys untouched', () => {
+    expect(withoutRetiredEnvSetupKeys('A=1\nB=2').removed).toEqual([]);
   });
 });

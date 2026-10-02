@@ -1,9 +1,9 @@
 /**
  * Reads a single value from a per-environment `.env.<environment>` file at the project root.
  *
- * Used by validate-only providers (Stripe, Turnstile) whose app secrets live directly in
- * `.env.<environment>` (not in `.setup/.setup-credentials`) — the environment dimension is the
- * file, not a key suffix. Returns `undefined` when the file is absent or the key is empty.
+ * Used to check what an app's env file already holds (e.g. Stripe / Google values, which setup
+ * writes there from `.setup/.setup-credentials`). Returns `undefined` when the file is absent or
+ * the key is empty.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { targetRoot } from '@setup/common/paths.js';
@@ -70,7 +70,7 @@ export function setEnvFileValue(environmentName: string, key: string, value: str
   const content = readFileSync(filePath, 'utf-8');
   const lineRegex = new RegExp(`^${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}=.*$`, 'm');
   const next = lineRegex.test(content)
-    ? content.replace(lineRegex, `${key}=${value}`)
+    ? content.replace(lineRegex, () => `${key}=${value}`) // literal: `$&` in a value stays as is
     : `${content.replace(/\n*$/, '')}\n${key}=${value}\n`;
   writeSecretFile(filePath, next);
   return true;

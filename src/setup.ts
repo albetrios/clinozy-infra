@@ -1,3 +1,4 @@
+import { setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net';
 import {
   runProvision,
   runCheck,
@@ -10,6 +11,7 @@ import {
 } from './infra/orchestrator.js';
 import { runInitWizard } from './infra/init-wizard.js';
 import { runDoctor } from './infra/doctor.js';
+import { runPrerequisitesCheck } from './infra/prerequisites.js';
 import { runNextSteps } from './infra/next-steps.js';
 import { loadConfig } from './common/config.js';
 import { runExample } from './infra/example.js';
@@ -25,6 +27,18 @@ import { omitUndefined } from './common/object.js';
 import { reportSetupError } from './common/setup-error.js';
 import * as logger from './common/logger.js';
 import type { ProviderSelectionInput } from './infra/orchestrator.js';
+
+// Node abandons each address of a dual-stack host after 250 ms; on a slow or IPv6-broken network
+// every attempt is cut off and fetch fails with ETIMEDOUT. Give each attempt 2 s — here and in the
+// child Node processes setup spawns (the backend's postman/scalar/migrate scripts).
+const CONNECT_ATTEMPT_MS = 2_000;
+setDefaultAutoSelectFamilyAttemptTimeout(CONNECT_ATTEMPT_MS);
+process.env.NODE_OPTIONS = [
+  process.env.NODE_OPTIONS,
+  `--network-family-autoselection-attempt-timeout=${CONNECT_ATTEMPT_MS}`,
+]
+  .filter(Boolean)
+  .join(' ');
 
 const args = process.argv.slice(2);
 
@@ -58,6 +72,7 @@ function getCommand(): string {
   ) {
     return 'delete';
   }
+  if (args.includes('--prereqs')) return 'prereqs';
   if (args.includes('--doctor')) return 'doctor';
   if (args.includes('--next')) return 'next';
   if (args.includes('--example')) return 'example';
@@ -133,6 +148,9 @@ function printHelp(): void {
     '  pnpm setup --inspect                 Remote inspection: present/absent + config-vs-remote drift',
   );
   logger.info(
+    '  pnpm setup --prereqs                 Check tools, logins, config and credentials (also runs first inside a run)',
+  );
+  logger.info(
     '  pnpm setup --doctor                  Validate config + flag footguns (also runs first inside --plan)',
   );
   logger.info(
@@ -195,12 +213,15 @@ async function main(): Promise<void> {
       case 'plan':
         await runPlan({ providerSelection, remote: args.includes('--remote') });
         break;
+      case 'prereqs':
+        await runPrerequisitesCheck(loadConfig());
+        break;
       case 'doctor':
         runDoctor();
         break;
       case 'next': {
         const config = loadConfig();
-        await runNextSteps(config, loadSecrets(config));
+        await runNextSteps(config);
         break;
       }
       case 'example':

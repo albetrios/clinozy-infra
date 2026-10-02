@@ -1,4 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import {
+  buildEnvSetupTemplateContent,
+  credentialUrl,
+  perEnvironmentCredentialKeys,
+} from '@setup/common/secrets.js';
+import type { SetupConfig } from '@setup/common/types.js';
+import { buildGuideSteps } from '@setup/infra/guide.js';
+import { buildConfig } from '@setup/infra/init-wizard.js';
 import { PRESETS, presetToProvider } from '@setup/presets/index.js';
 
 describe('preset catalog', () => {
@@ -50,6 +58,66 @@ describe('preset catalog', () => {
       const inspection = await provider.inspectRemote?.(context);
       expect(inspection?.present).toBe(false);
       expect(inspection?.error).toMatch(/guide-only/);
+    }
+  });
+});
+
+describe('per-environment credentials (.setup/.setup-credentials KEY__<environment>)', () => {
+  const config = (stripe: boolean, google: boolean): SetupConfig => {
+    const base = buildConfig('acme-org', 'acme-be', 'Acme Backend', ['development', 'production']);
+    return {
+      ...base,
+      providers: {
+        ...base.providers,
+        stripe: { ...base.providers.stripe, enabled: stripe },
+        oauth: { ...base.providers.oauth, google: { enabled: google } },
+      },
+    };
+  };
+
+  it('templates each enabled guide field once per environment, and nothing when disabled', () => {
+    expect(perEnvironmentCredentialKeys(config(false, false))).toEqual([]);
+    const keys = perEnvironmentCredentialKeys(config(true, true));
+    expect(keys).toContain('STRIPE_SECRET_KEY__production');
+    expect(keys).toContain('OAUTH_GOOGLE_CLIENT_SECRET__development');
+    expect(buildEnvSetupTemplateContent(config(true, false))).toContain(
+      'STRIPE_WEBHOOK_SECRET__development=',
+    );
+  });
+
+  it('only templates keys the guide presets actually collect', () => {
+    const collected = new Set(
+      PRESETS.flatMap((preset) =>
+        preset.kind === 'guide' ? preset.guide.fields.map((field) => field.key) : [],
+      ),
+    );
+    for (const key of perEnvironmentCredentialKeys(config(true, true))) {
+      expect(collected).toContain(key.replace(/__[a-z0-9_-]+$/, ''));
+    }
+  });
+});
+
+describe('credentials guide (asks once for missing .setup-credentials values)', () => {
+  it('shows a link for every prompt', () => {
+    const base = buildConfig('acme-org', 'acme-be', 'Acme Backend', ['development', 'production']);
+    const config: SetupConfig = {
+      ...base,
+      product: { name: 'acme', domain: 'acme.test' },
+      providers: {
+        ...base.providers,
+        stripe: { ...base.providers.stripe, enabled: true },
+        oauth: { ...base.providers.oauth, google: { enabled: true } },
+      },
+    };
+    for (const step of buildGuideSteps(config)) {
+      for (const environmentName of step.scope === 'per-environment'
+        ? ['development', 'production']
+        : [undefined]) {
+        for (const prompt of step.prompts) {
+          const url = step.url?.(environmentName) ?? credentialUrl(prompt.key);
+          expect(url, `${step.providerName} ${prompt.key}`).toMatch(/^https:\/\//);
+        }
+      }
     }
   });
 });

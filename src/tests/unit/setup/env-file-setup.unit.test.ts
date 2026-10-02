@@ -114,6 +114,13 @@ describe('resolveNonInteractiveFieldValue', () => {
     );
   });
 
+  it('never uses the shared key for a per-environment field', () => {
+    const env = { STRIPE_SECRET_KEY: 'sk_test_from_shell' };
+    expect(
+      resolveNonInteractiveFieldValue('STRIPE_SECRET_KEY', 'production', env, { shared: false }),
+    ).toBeUndefined();
+  });
+
   it('trims whitespace and treats blank as unset', () => {
     expect(resolveNonInteractiveFieldValue('K', 'development', { K: '  v  ' })).toBe('v');
     expect(resolveNonInteractiveFieldValue('K', 'development', { K: '   ' })).toBeUndefined();

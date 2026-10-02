@@ -10,13 +10,15 @@
  * NAMING (single source of truth = setup.config.json): a `*.netlify.app` production URL
  * (`frontend.url.<production env>`) names the site by its first label; a custom domain uses
  * `frontend.name` and is attached to the site on creation — never hardcoded.
- * SECRETS: NETLIFY_AUTH_TOKEN comes from `.setup-credentials` or the Netlify CLI's saved login, is
- * never printed, and is written only to the frontend env (see frontend-env-keys.ts).
+ * SECRETS: the token comes only from the Netlify CLI's login (`netlify login`) — never from
+ * `.setup-credentials` — is never printed, and is written only to the frontend env as
+ * NETLIFY_AUTH_TOKEN (see frontend-env-keys.ts).
  */
 import { requireDnsRecord } from '@setup/common/dns-requirements.js';
 import * as logger from '@setup/common/logger.js';
 import { resourceStatus } from '@setup/common/interactive-step.js';
 import { SetupError } from '@setup/common/setup-error.js';
+import { NETLIFY_LOGIN_COMMAND } from '@setup/common/secrets.js';
 import { setupFetch } from '@setup/common/setup-fetch.js';
 import { frontendOriginForEnvironment } from '@setup/envs/env-file-setup.util.js';
 import type {
@@ -29,7 +31,7 @@ import type {
 
 const NETLIFY_API = 'https://api.netlify.com/api/v1';
 const NETLIFY_SUBDOMAIN_SUFFIX = '.netlify.app';
-const NETLIFY_TOKEN_URL = 'https://app.netlify.com/user/applications#personal-access-tokens';
+const NETLIFY_CLI_URL = 'https://docs.netlify.com/cli/get-started/';
 
 type FetchImplementation = (url: string, init?: RequestInit) => Promise<Response>;
 
@@ -214,11 +216,15 @@ export const setupNetlifyProvider: InfraProvider = {
     }
     return secrets.netlify?.authToken
       ? ''
-      : 'NETLIFY_AUTH_TOKEN missing in .setup/.setup-credentials (or log in with the Netlify CLI)';
+      : `not logged in to Netlify — run \`${NETLIFY_LOGIN_COMMAND}\``;
   },
   preview: ({ config }) =>
     isConfigEnabled(config)
-      ? { detail: 'Personal access token', url: NETLIFY_TOKEN_URL, configKey: 'netlify.authToken' }
+      ? {
+          detail: `Netlify CLI login (${NETLIFY_LOGIN_COMMAND})`,
+          url: NETLIFY_CLI_URL,
+          configKey: 'netlify login',
+        }
       : null,
   settingsReview: ({ config }) => {
     const target = netlifySiteTarget(config);

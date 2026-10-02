@@ -36,7 +36,8 @@ import { fileURLToPath } from 'node:url';
 import { runGhAuthPreflight } from './auth-preflight.js';
 import { ghTry, resolveRepository } from './gh.js';
 
-const RULESETS_DIRECTORY = targetPath('.github', 'rulesets');
+/** The backend's `.github/rulesets` — resolved on use, so importing never needs the repo. */
+const rulesetsDirectory = (): string => targetPath('.github', 'rulesets');
 
 export interface LocalRuleset {
   readonly fileName: string;
@@ -88,7 +89,7 @@ export function runGhJson<T>(
   }
 }
 
-export function loadLocalRulesets(directory: string = RULESETS_DIRECTORY): LocalRuleset[] {
+export function loadLocalRulesets(directory: string = rulesetsDirectory()): LocalRuleset[] {
   const entries = readdirSync(directory)
     .filter((entry) => entry.endsWith('.json'))
     .sort((left, right) => left.localeCompare(right));
@@ -300,7 +301,7 @@ export async function main(): Promise<void> {
   const locals = loadLocalRulesets();
 
   console.log(`Repository:  ${repository}`);
-  console.log(`Source dir:  ${RULESETS_DIRECTORY}`);
+  console.log(`Source dir:  ${rulesetsDirectory()}`);
   console.log(`Local files: ${locals.map((file) => file.fileName).join(', ')}`);
   console.log(`Mode:        ${mode}`);
   console.log('');

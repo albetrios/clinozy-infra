@@ -297,6 +297,12 @@ export function loadConfig(): z.infer<typeof setupConfigSchema> {
   return parseAndNormalizeConfig(readFileSync(CONFIG_PATH, 'utf-8'));
 }
 
+/** The frontend's GitHub repository: the backend repository's owner + `frontend.name`. */
+export function frontendRepository(config: ParsedSetupConfig): string | undefined {
+  const owner = config.providers.github.repository.split('/')[0];
+  return owner && config.frontend?.name ? `${owner}/${config.frontend.name}` : undefined;
+}
+
 export function getEnvironmentNames(config: z.infer<typeof setupConfigSchema>): string[] {
   return config.environments.map((environment) => environment.name);
 }

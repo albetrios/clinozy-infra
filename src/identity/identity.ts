@@ -23,7 +23,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { buildDefaultArtifacts } from '@setup/codegen/project-identity.util.js';
+import { buildDefaultArtifacts } from '@setup/identity/project-identity.util.js';
 
 export const SETUP_CONFIG = 'setup.config.json';
 export const PACKAGE_JSON = 'package.json';

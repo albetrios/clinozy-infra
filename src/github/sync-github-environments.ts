@@ -238,7 +238,7 @@ interface EnvEntry {
 }
 
 /** Rule-based classification — the file structure is for readability only. */
-function classifyKey(key: string): 'secret' | 'variable' {
+export function classifyKey(key: string): 'secret' | 'variable' {
   // Credential / signing material suffixes → Secret
   if (key.endsWith('_API_KEY')) return 'secret';
   if (key.endsWith('_SECRET_KEY')) return 'secret';
@@ -256,7 +256,7 @@ function classifyKey(key: string): 'secret' | 'variable' {
   if (key.endsWith('_WORKSPACE_ID')) return 'secret';
 
   // Connection strings with embedded credentials → Secret
-  if (key === 'DATABASE_URL' || key === 'DATABASE_MIGRATION_URL') return 'secret';
+  if (key.startsWith('DATABASE_') && key.endsWith('_URL')) return 'secret';
   if (key === 'REDIS_URL' || key === 'REDIS_BULLMQ_URL') return 'secret';
 
   // Auth secrets → Secret

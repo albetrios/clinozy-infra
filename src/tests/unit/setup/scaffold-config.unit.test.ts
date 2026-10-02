@@ -15,7 +15,7 @@ describe('renderInfraConfigTs', () => {
   const ts = renderInfraConfigTs(PRESETS);
 
   it('imports defineInfraConfig and every preset, and lists them as resources', () => {
-    expect(ts).toContain("import { defineInfraConfig } from './src/infra/config.js';");
+    expect(ts).toContain("import { defineInfraConfig } from './src/infra/infra-config.js';");
     expect(ts).toContain('export default defineInfraConfig(');
     expect(ts).toContain('resources: () => [');
     for (const preset of PRESETS) {

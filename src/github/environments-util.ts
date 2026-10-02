@@ -4,7 +4,8 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import { omitUndefined } from '@setup/common/object.js';
 
-const ENVIRONMENTS_DIRECTORY = targetPath('.github', 'environments');
+/** The backend's `.github/environments` — resolved on use, so importing never needs the repo. */
+const defaultEnvironmentsDirectory = (): string => targetPath('.github', 'environments');
 
 const requiredReviewersSchema = z.object({
   users: z.array(z.string().min(1)).default([]),
@@ -69,7 +70,7 @@ function sortedUniqueNormalized(values: string[], normalize: (value: string) => 
 }
 
 export function loadGitHubEnvironmentConfigs(
-  environmentsDirectory = ENVIRONMENTS_DIRECTORY,
+  environmentsDirectory = defaultEnvironmentsDirectory(),
 ): GitHubEnvironmentConfig[] {
   const fileNames = readdirSync(environmentsDirectory)
     .filter((fileName) => fileName.endsWith('.json'))

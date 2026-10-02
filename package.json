@@ -6,7 +6,7 @@
   "description": "Standalone infrastructure provisioning tool (setup:infra) for the clinozy-be application repo.",
   "packageManager": "pnpm@11.1.1",
   "engines": {
-    "node": ">=24",
+    "node": ">=24.15",
     "pnpm": ">=11.1.1"
   },
   "scripts": {
@@ -16,6 +16,7 @@
     "setup:infra:preview": "tsx src/setup.ts --preview",
     "setup:infra:plan": "tsx src/setup.ts --plan",
     "setup:infra:inspect": "tsx src/setup.ts --inspect",
+    "setup:infra:prereqs": "tsx src/setup.ts --prereqs",
     "setup:infra:doctor": "tsx src/setup.ts --doctor",
     "setup:infra:next": "tsx src/setup.ts --next",
     "setup:infra:example": "tsx src/setup.ts --example",
@@ -39,8 +40,6 @@
     "setup:github:dry-run": "tsx src/github/sync.ts --dry-run",
     "setup:github:status": "tsx src/github/github.ts --status",
     "validate:github-environments": "tsx src/github/environments.ts --check",
-    "setup:retention-secrets": "tsx src/push-retention-secrets.ts",
-    "setup:push-retention-secrets": "tsx src/push-retention-secrets.ts",
     "rebrand": "tsx src/identity/rebrand.ts",
     "identity:sync": "tsx src/identity/rebrand.ts --sync --apply",
     "validate:identity": "tsx src/identity/validate-identity.ts",

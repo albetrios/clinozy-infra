@@ -6,7 +6,7 @@
  * NAMING (single source of truth = setup.config.json): organization/project names from
  * `config.project.*`, environment names from `config.environments[].name` — never hardcoded.
  * SECRETS: written to `.env.<environment>` only (via build-env-vars), never printed to the
- * console; setup secret files are gitignored and unreadable by the agent (deny-read guard). See SETUP_INFRA_PROVIDER_TEMPLATE.md.
+ * console; setup secret files are gitignored and written owner-only. See SETUP_INFRA_PROVIDER_TEMPLATE.md.
  */
 import * as logger from '@setup/common/logger.js';
 import { isSecretFilled } from '@setup/common/secrets.js';
