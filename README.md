@@ -116,6 +116,10 @@ CLINOZY_BE_DIR=/path/to/clinozy-be pnpm setup:infra:status
 Dev: `pnpm health` (lint, typecheck, tests, identity — every phase, one summary), `pnpm lint[:fix]`,
 `pnpm format`, `pnpm typecheck`, `pnpm test`.
 
+**Changing this repo:** `main` is protected like the apps' — changes land through a pull request,
+squash-merged, once CI (`checks`: lint, typecheck, tests) passes. The rules live in
+`.github/rulesets/main.json`; `pnpm github:rulesets:self` applies them (`:check` reports drift).
+
 ## Identity and rebrand
 
 The product identity is `package.json` → `name` plus `setup.config.json` → `project.name`,

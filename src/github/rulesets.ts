@@ -15,10 +15,15 @@
  * "Upgrade to GitHub Pro or make this repository public to enable this feature."
  * The script surfaces that message verbatim and exits non-zero.
  *
+ * Targets:
+ *   - default      : the backend repo (`providers.github.repository`) from its `.github/rulesets`.
+ *   - --self       : this repo (clinozy-infra) from its own `.github/rulesets` — `main` is
+ *                    protected the same way as the apps' (squash-only, CI must pass).
+ *
  * Usage:
- *   pnpm gh:rulesets:sync
- *   pnpm gh:rulesets:sync:dry-run
- *   pnpm gh:rulesets:check
+ *   pnpm github:rulesets:self [--check | --dry-run]   this repo
+ *   pnpm github:rulesets:self:check                   this repo, read-only drift check
+ *   tsx src/github/rulesets.ts [--check | --dry-run]  the backend repo (prefer its own github:sync)
  *
  * Importable surface (consumed by init-branches.ts):
  *   - getRepositoryIdentifier()
@@ -28,13 +33,13 @@
  *   - explainPlanBlocker()
  */
 
-import { targetPath } from '@setup/common/paths.js';
+import { targetPath, toolPath } from '@setup/common/paths.js';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { runGhAuthPreflight } from './auth-preflight.js';
-import { ghTry, resolveRepository } from './gh.js';
+import { ghTry, resolveRepository, toolRepository } from './gh.js';
 
 /** The backend's `.github/rulesets` — resolved on use, so importing never needs the repo. */
 const rulesetsDirectory = (): string => targetPath('.github', 'rulesets');
@@ -268,40 +273,45 @@ export function syncRulesets(args: {
 
 interface CliOptions {
   readonly mode: SyncMode;
+  /** Sync this repo's own `.github/rulesets` to this repo instead of the backend's. */
+  readonly self: boolean;
 }
 
 function parseArguments(): CliOptions {
-  const argumentsList = process.argv.slice(2);
+  const self = process.argv.includes('--self');
+  const argumentsList = process.argv.slice(2).filter((argument) => argument !== '--self');
 
   if (argumentsList.includes('--help') || argumentsList.includes('-h')) {
-    console.log('Usage: pnpm gh:rulesets:sync [--check | --dry-run]');
+    console.log('Usage: tsx src/github/rulesets.ts [--self] [--check | --dry-run]');
     console.log('');
     console.log('  (default)   Create-or-update each .github/rulesets/*.json on the repo');
+    console.log("  --self      This repo's own .github/rulesets, applied to this repo");
     console.log('  --check     Report drift between local files and remote rulesets');
     console.log('  --dry-run   Show what would be created or updated without writing');
     process.exit(0);
   }
 
   if (argumentsList.includes('--check')) {
-    return { mode: 'check' };
+    return { mode: 'check', self };
   }
   if (argumentsList.includes('--dry-run')) {
-    return { mode: 'dry-run' };
+    return { mode: 'dry-run', self };
   }
   if (argumentsList.length === 0) {
-    return { mode: 'sync' };
+    return { mode: 'sync', self };
   }
 
   throw new Error(`Unknown argument(s): ${argumentsList.join(' ')}. Use --help for options.`);
 }
 
 export async function main(): Promise<void> {
-  const { mode } = parseArguments();
-  const repository = getRepositoryIdentifier();
-  const locals = loadLocalRulesets();
+  const { mode, self } = parseArguments();
+  const repository = self ? toolRepository() : getRepositoryIdentifier();
+  const sourceDirectory = self ? toolPath('.github', 'rulesets') : rulesetsDirectory();
+  const locals = loadLocalRulesets(sourceDirectory);
 
   console.log(`Repository:  ${repository}`);
-  console.log(`Source dir:  ${rulesetsDirectory()}`);
+  console.log(`Source dir:  ${sourceDirectory}`);
   console.log(`Local files: ${locals.map((file) => file.fileName).join(', ')}`);
   console.log(`Mode:        ${mode}`);
   console.log('');
@@ -327,7 +337,9 @@ export async function main(): Promise<void> {
       process.exit(1);
     }
     console.error(`Drift detected: ${result.drift} local ruleset(s) missing on remote.`);
-    console.error('Run `pnpm gh:rulesets:sync` to apply them.');
+    console.error(
+      `Run \`${self ? 'pnpm github:rulesets:self' : 'tsx src/github/rulesets.ts'}\` to apply them.`,
+    );
     process.exit(1);
   }
 

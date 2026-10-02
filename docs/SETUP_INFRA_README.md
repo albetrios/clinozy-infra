@@ -98,6 +98,7 @@ environment, `netlify` finds or creates the frontend site.
 | `setup:infra:example` · `setup:infra:vault` | Print a generated `.env.example` · mirror into KeyStash (off by default) |
 | `setup:infra:delete` | Print the **manual** delete guide — setup never deletes resources |
 | `setup:github` / `github:sync` (`:check`, `:dry-run`, `:status`) | Backend repo only (from `providers.github.repository`): branches, rulesets, Environments; push `.env.<env>`. Prefer each app's own `pnpm github:sync`, which the checklist uses |
+| `github:rulesets:self` (`:check`) | This repo's own `main` protection from `.github/rulesets/main.json` — the apps' rules (no deletion or force-push, linear history, squash-only pull requests) with this repo's CI job `checks` required |
 | `setup:domain` | Attach a Railway custom domain by hand (`src/railway/custom-domain.ts`) |
 | `rebrand` · `validate:identity` · `identity:sync` | Rename the product / check identity drift (see [README](../README.md)) |
 | `health` | Lint, typecheck, tests, identity — every phase, one summary |
@@ -113,8 +114,10 @@ environment, `netlify` finds or creates the frontend site.
 - **Files.** `.setup/` and `.env.*` (except `*.example`) are gitignored; credential files are written
   owner-only (`0600`). Database users are created by SQL as the provider's owner (never Neon's REST
   API, which grants BYPASSRLS), and runtime users are checked to stay subject to row-level security.
-- **Not in this repo yet:** a pre-commit secret scan and CI. Run `pnpm health` before pushing, and
-  never `git add -f` anything under `.setup/`.
+- **CI and branch protection.** `.github/workflows/ci.yml` runs lint, typecheck and tests on every pull
+  request, and `main` only accepts squash-merged pull requests that pass it (`.github/rulesets/main.json`,
+  applied by `pnpm github:rulesets:self`). **Not in this repo yet:** a pre-commit secret scan — run
+  `pnpm health` before pushing, and never `git add -f` anything under `.setup/`.
 
 Every provider starts with the standard header (name · description · NAMING source · SECRETS rule) —
 see [SETUP_INFRA_PROVIDER_TEMPLATE.md](./SETUP_INFRA_PROVIDER_TEMPLATE.md).

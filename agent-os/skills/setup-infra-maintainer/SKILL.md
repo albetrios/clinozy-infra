@@ -34,7 +34,8 @@ Presets (the preferred way to declare a service): the `preset-author` skill.
 - **Inputs live in `.setup/.setup-credentials`** (gitignored, `0600`): account tokens as plain keys,
   per-environment app secrets as `KEY__<environment>`. The guide asks once for missing values.
 - **State is ephemeral** (`src/common/state.ts`, in-memory). Don't add a state file.
-- **No pre-commit secret scan or CI in this repo** — never force-add `.setup/` or `.env.*`.
+- **CI runs on every pull request and `main` is protected** (squash-only, CI `checks` must pass —
+  `.github/rulesets/main.json`). There is no pre-commit secret scan — never force-add `.setup/` or `.env.*`.
 
 ## Checklist: ADD a provider
 

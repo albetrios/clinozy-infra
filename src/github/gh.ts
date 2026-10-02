@@ -11,6 +11,7 @@
  */
 import { runCommand, type RunCommandResult } from '@setup/common/exec.js';
 import { loadConfig } from '@setup/common/config.js';
+import { toolRoot } from '@setup/common/paths.js';
 import { SetupError } from '@setup/common/setup-error.js';
 
 export interface GhOptions {
@@ -40,11 +41,12 @@ export function ghJson<T = unknown>(args: string[], options: GhOptions = {}): T 
   }
 }
 
-function repositoryFromGitRemote(): string | undefined {
+function repositoryFromGitRemote(cwd?: string): string | undefined {
   const result = runCommand('git', {
     args: ['remote', 'get-url', 'origin'],
     allowFailure: true,
     timeoutMs: 5_000,
+    ...(cwd !== undefined ? { cwd } : {}),
   });
   if (result.status !== 0) return undefined;
   const remoteUrl = result.stdout.trim();
@@ -89,5 +91,14 @@ export function resolveRepository(): string {
 
   throw new SetupError(
     'Cannot resolve repository: set GITHUB_REPOSITORY, use a github.com git remote, or authenticate gh.',
+  );
+}
+
+/** This tool's own repository (`owner/clinozy-infra`), read from the git remote of its checkout. */
+export function toolRepository(): string {
+  const fromGit = repositoryFromGitRemote(toolRoot());
+  if (fromGit) return fromGit;
+  throw new SetupError(
+    `Cannot resolve this repository: ${toolRoot()} has no github.com origin remote.`,
   );
 }
