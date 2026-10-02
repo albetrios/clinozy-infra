@@ -35,6 +35,8 @@
     "tool:railway-deploy-image": "tsx src/railway/deploy-image.ts",
     "github:sync": "tsx src/github/sync.ts",
     "github:sync:dry-run": "tsx src/github/sync.ts --dry-run",
+    "github:rulesets:self": "tsx src/github/rulesets.ts --self",
+    "github:rulesets:self:check": "tsx src/github/rulesets.ts --self --check",
     "setup:github": "tsx src/github/sync.ts",
     "setup:github:check": "tsx src/github/sync.ts --check",
     "setup:github:dry-run": "tsx src/github/sync.ts --dry-run",

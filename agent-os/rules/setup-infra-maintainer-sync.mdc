@@ -28,7 +28,7 @@ in each script that references org/project/env names.
 - **Secrets go to the apps' `.env.<environment>` only** (via `build-env-vars.ts` → export). `setup:infra:output` shows a masked inventory; `--copy <KEY>` puts one value on the clipboard (auto-cleared, audit-logged to `.setup/.setup-state.audit.log`).
 - **Your inputs live in `.setup/.setup-credentials`** (gitignored, `0600`); per-environment app secrets as `KEY__<environment>`. The guide asks once for missing values and saves them there.
 - **State is ephemeral (in-memory only)** — `src/common/state.ts` never writes a file. Don't reintroduce a persisted state file unless asked.
-- **No pre-commit secret scan or CI exists in this repo** — never force-add `.setup/` or `.env.*`; run `pnpm health` before pushing.
+- **CI runs on every pull request and `main` is protected** (squash-only, CI `checks` must pass — `.github/rulesets/main.json`). There is no pre-commit secret scan — never force-add `.setup/` or `.env.*`; run `pnpm health` before pushing.
 
 ### Idempotency — present? update or skip; absent? create
 
