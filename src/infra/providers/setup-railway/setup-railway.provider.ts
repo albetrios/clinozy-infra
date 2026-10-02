@@ -15,7 +15,12 @@ import { setupFetch } from '@setup/common/setup-fetch.js';
 import { resourceStatus } from '@setup/common/interactive-step.js';
 import { plainDnsType, requireDnsRecord } from '@setup/common/dns-requirements.js';
 import { apiHostForEnvironment } from '@setup/envs/env-file-setup.util.js';
-import { ensureCustomDomain, ensureServiceDomain } from '@setup/railway/railway-api.js';
+import {
+  ensureCustomDomain,
+  ensureServiceDomain,
+  ensureServiceVariable,
+  railwayVerificationRecord,
+} from '@setup/railway/railway-api.js';
 import type {
   SetupConfig,
   SetupState,
@@ -545,6 +550,21 @@ export async function provision(
           `  API domain for "${environmentName}" ${created ? 'created' : 'found'}: https://${domain.domain}`,
         );
 
+        // The domains route to config.app.port. Without a PORT variable Railway injects 8080, the API
+        // listens there instead, and every request through the domains gets a 502 — pin it.
+        const portPinned = await ensureServiceVariable(apiToken, {
+          projectId: railwayProjectId,
+          environmentId: environmentState.environmentId,
+          serviceId: apiService.serviceId,
+          name: 'PORT',
+          value: String(config.app.port),
+        });
+        if (portPinned) {
+          logger.success(
+            `  API PORT for "${environmentName}" set to ${config.app.port}, the port its domains route to`,
+          );
+        }
+
         // The product's own hostname (`api.<domain>` / `<env>--api.<domain>`), attached on top. It
         // wins downstream once recorded; Railway issues the certificate when DNS points at it.
         const customHost = apiHostForEnvironment(config, environmentName);
@@ -584,10 +604,23 @@ export async function provision(
               });
             }
           }
+          // Railway verifies ownership with a `_railway-verify` TXT record before it issues the
+          // certificate; the checklist lists it beside the CNAME.
+          const verification = railwayVerificationRecord(customDomain.domain, customDomain.status);
+          if (verification) {
+            requireDnsRecord({
+              provider: 'Railway',
+              type: 'TXT',
+              name: verification.name,
+              value: verification.value,
+            });
+          }
           if (!customDomain.status.verified) {
             for (const record of customDomain.status.dnsRecords) {
               logger.info(`    DNS: ${record.recordType} ${record.fqdn} → ${record.requiredValue}`);
             }
+            if (verification)
+              logger.info(`    DNS: TXT ${verification.name} → ${verification.value}`);
           }
         }
       } catch (domainError) {

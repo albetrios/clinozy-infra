@@ -106,7 +106,11 @@ env file.
 | any other | `https://<env>--<frontend.name>.netlify.app` (Netlify alias) | `https://<env>--api.<domain>` (Railway custom domain) | the frontend |
 
 Email is sent from `noreply@<domain>`; setup registers the domain with Resend. Turnstile widgets
-allow both hosts. Each Railway, Netlify and Resend step prints the DNS records still to create. An
+allow both hosts. Each Railway, Netlify and Resend step prints the DNS records still to create, and
+`pnpm setup:infra:next` re-checks them live. A Railway custom domain needs two: the CNAME to its
+`*.up.railway.app` target and the `_railway-verify.<host>` TXT ownership record — Railway issues the
+certificate only once both resolve. Setup also pins the API service's `PORT` to `app.port`, the port
+both API domains route to (without it Railway injects 8080 and the domains answer 502). An
 explicit `frontend.url.<env>` / `app.frontendUrl.<env>` / `app.allowedOrigins.<env>` /
 `providers.resend.fromAddress` still wins over the derived value.
 
