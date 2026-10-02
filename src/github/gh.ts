@@ -17,6 +17,18 @@ import { SetupError } from '@setup/common/setup-error.js';
 export interface GhOptions {
   input?: string;
   timeoutMs?: number;
+  /** Environment for `gh` — e.g. {@link operatorGhEnv} to act as the operator's own login. */
+  env?: NodeJS.ProcessEnv;
+}
+
+/**
+ * This process's environment without `GITHUB_TOKEN` / `GH_TOKEN`, so `gh` acts as the operator's
+ * own `gh auth login` instead of setup's narrowly-scoped token from `.setup/.setup-credentials`.
+ */
+export function operatorGhEnv(): NodeJS.ProcessEnv {
+  return Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => key !== 'GITHUB_TOKEN' && key !== 'GH_TOKEN'),
+  );
 }
 
 /** Run `gh <args>` (no shell). Returns trimmed stdout; throws SetupError on non-zero exit. */

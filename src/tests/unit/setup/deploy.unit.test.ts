@@ -22,6 +22,7 @@ const config = () =>
 const backend = { label: 'backend', repository: 'acme/acme-api' } as const;
 
 function fakeGithub(state: {
+  login?: string;
   isPrivate?: boolean;
   plan?: string;
   variable?: string;
@@ -31,6 +32,7 @@ function fakeGithub(state: {
 }) {
   const calls: string[] = [];
   const github: DeployGithub = {
+    login: () => state.login ?? 'operator',
     repository: () => ({
       isPrivate: state.isPrivate ?? true,
       ownerType: 'Organization',
@@ -144,6 +146,12 @@ describe('runDeploy', () => {
     await expect(runDeploy(config(), { app: 'api' }, github)).rejects.toThrow(
       /backend or frontend/,
     );
+  });
+
+  it("refuses to run without the operator's own gh login", async () => {
+    const { github, calls } = fakeGithub({ login: '' });
+    await expect(runDeploy(config(), {}, github)).rejects.toThrow(/gh auth login/);
+    expect(calls).toEqual([]);
   });
 
   it('never touches production without --production', async () => {
