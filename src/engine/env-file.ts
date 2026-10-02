@@ -87,6 +87,31 @@ export function upsertEnvContent(
 }
 
 /**
+ * Remove whole entries (an opening line plus any quoted continuation lines) for `keys`. Comments and
+ * every other line are left byte-for-byte. The surgical counterpart of {@link upsertEnvContent}, for
+ * keys setup knows must NOT be set.
+ */
+export function removeEnvKeys(
+  existingText: string,
+  keys: readonly string[],
+): { text: string; removed: string[] } {
+  if (keys.length === 0 || existingText.length === 0) return { text: existingText, removed: [] };
+  const wanted = new Set(keys);
+  const lines = existingText.split(/\r?\n/);
+  const removed: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i]?.match(VAR_RE);
+    const key = m?.[2];
+    if (!(m && key && wanted.has(key))) continue;
+    const end = entryEndIndex(lines, i, m[4] ?? '');
+    lines.splice(i, end - i + 1);
+    removed.push(key);
+    i -= 1; // re-examine the line that moved into this slot
+  }
+  return { text: removed.length ? lines.join('\n') : existingText, removed };
+}
+
+/**
  * Upsert keys into a .env file on disk (writes with a trailing newline). Thin
  * IO wrapper over {@link upsertEnvContent} using the default {@link formatValue}.
  */

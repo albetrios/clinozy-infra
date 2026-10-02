@@ -1,9 +1,10 @@
 # Add a new setup:infra provider
 
 Step-by-step to wire a new third-party into `pnpm setup:infra`. The orchestrator is
-**registry-driven**: it iterates `INFRA_PROVIDERS` and calls each provider's interface
-hooks — so you do **not** edit `orchestrator.ts`. You touch the config schema, the secret
-store, the env emission, and drop one provider file.
+**registry-driven**: it runs the providers listed in `infra.config.ts` (resolved by
+`src/infra/providers/index.ts`) and calls each one's interface hooks — so you do **not** edit
+`orchestrator.ts`. Prefer a **preset** (`src/presets/`, see the `preset-author` skill); write a
+bespoke provider only for a service that needs its own API client. Paths below are under `src/`.
 
 Replace `<key>` (kebab-case, e.g. `posthog`) and `<Name>` (PascalCase, e.g. `Posthog`)
 throughout. See `setup-resend` (validate-only), `setup-sentry` (writes state), and
@@ -26,16 +27,13 @@ Pick the shape:
 
 - **Single global token** → add to `TOKEN_URLS` + `SIMPLE_VARS` (template + append handle it
   automatically) and read it in `loadSecretsFromEnv`.
-- **Per-environment keys** → add a per-env Zod schema, read `MYVAR_<ENV>_*` in the
-  `for (const env of environmentNames)` loop, and add a block in **both**
-  `buildEnvSetupTemplateContent` and `appendMissingEnvSetupVariables`.
+- **Per-environment app secrets that no API can create** (like Stripe / Google) → add an entry
+  to `PER_ENVIRONMENT_VARS`: the template and the append step then list `KEY__<environment>`
+  lines, and guide fields read them before prompting.
 
 ```ts
 // setupSecretsSchema
 <key>: z.object({ apiKey: z.string() }).optional().default({ apiKey: '' }),
-// or per-env:
-<key>: z.record(z.string(), z.object({ siteKey: z.string(), secretKey: z.string() }))
-  .optional().default({}),
 ```
 
 Then map it in the object `loadSecretsFromEnv` returns. Update `hasAnyEnvSecret` only if the
@@ -55,14 +53,15 @@ obvious at a glance:
  * NAMING (single source of truth = setup.config.json): organization/project names from
  * `config.project.*`, environment names from `config.environments[].name` — never hardcoded.
  * SECRETS: written to `.env.<environment>` only (via build-env-vars), never printed to the
- * console; setup secret files are gitignored and unreadable by the agent (deny-read guard). See SETUP_INFRA_PROVIDER_TEMPLATE.md.
+ * console; setup secret files are gitignored and written owner-only. See SETUP_INFRA_PROVIDER_TEMPLATE.md.
  */
 ```
 
 ## Security (mandatory — applies to every step)
 
 - **Never print a secret value.** Providers log status only (`valid`, `resolved`) — never the key/token/password/connection-string itself. Don't `logger.*` a secret, don't echo it, don't put it in an error message. Operators view a masked inventory with `pnpm setup:infra:output`, or `--copy <KEY>` to put one value on the clipboard (never stdout, auto-cleared, audit-logged).
-- **Secrets land in `.env.<environment>` only**, via `build-env-vars.ts` → provisioning. State is ephemeral (in-memory, never persisted — there is no `.setup-state.json`). Both `.env.*` and `.setup-state.*` are blocked by the pre-commit secret guards (gitleaks + "No secret/state files staged") and unreadable by the agent (the `guardrails.mjs` deny-read hook).
+- **Secrets land in `.env.<environment>` only**, via `build-env-vars.ts` → provisioning. State is ephemeral (in-memory, never persisted — there is no `.setup-state.json`). `.env.*` and `.setup/` are gitignored; there is no pre-commit secret scan in this repo, so never force-add them.
+- **Errors**: wrap HTTP calls with `setupFetch` (`common/setup-fetch.ts`) — it redacts credentials from any thrown message.
 - **Connection strings** with embedded credentials are masked by `output.ts` automatically; no action needed, just don't log them.
 
 ## 3. State (`common/state.ts`) — only if the provider resolves/creates something
@@ -97,7 +96,7 @@ Sentry, PostHog, Resend; the latter passes it through `createValidationProvider`
 
 ## 5. Provider module (`infra/providers/setup-<key>/setup-<key>.provider.ts`)
 
-Implement the `InfraProvider` interface (see `common/types.ts`). Use `@tooling/setup/...`
+Implement the `InfraProvider` interface (see `common/types.ts`). Use `@setup/...`
 imports — never `../`. Minimal validate-only skeleton:
 
 ```ts
@@ -109,13 +108,13 @@ imports — never `../`. Minimal validate-only skeleton:
  * NAMING (single source of truth = setup.config.json): organization/project names from
  * `config.project.*`, environment names from `config.environments[].name` — never hardcoded.
  * SECRETS: written to `.env.<environment>` only (via build-env-vars), never printed to the
- * console; setup secret files are gitignored and unreadable by the agent (deny-read guard). See SETUP_INFRA_PROVIDER_TEMPLATE.md.
+ * console; setup secret files are gitignored and written owner-only. See SETUP_INFRA_PROVIDER_TEMPLATE.md.
  */
-import * as logger from '@tooling/setup/common/logger.js';
+import * as logger from '@setup/common/logger.js';
 import type {
   SetupConfig, SetupSecrets, ProviderResult,
   InfraProvider, InfraProviderContext,
-} from '@tooling/setup/common/types.js';
+} from '@setup/common/types.js';
 
 export async function provision(
   config: SetupConfig, secrets: SetupSecrets, environments: string[],
@@ -173,38 +172,40 @@ Implement `deleteInstructions(context)` whenever the provider provisions tracked
 (records `stateUpdates`) — returns dashboard URL + identifiers for the manual `--delete` guide). Never add a
 `destroy` method — `setup:infra` does not delete resources.
 
-## 6. Register (`infra/providers/index.ts`)
+## 6. Register (`infra.config.ts`)
 
-Import and add to `INFRA_PROVIDERS` (order = run order). That is the only registry edit.
+Wrap the provider in a preset (`src/presets/managed.presets.ts`), export it from
+`src/presets/index.ts`, and add it to `resources` in `infra.config.ts` (order = run order). That is
+the only registry edit.
 
-## 7. Guide (`infra/guide.ts`)
+## 7. Guide (`infra/guide.ts`) — only if it needs values from `.setup-credentials`
 
-Add a `buildGuideSteps()` entry: `providerName`, `enabledCheck`, `secretsCheck`,
-`browserUrls`, `instructions` (the manual fallback for when tokens aren't filled yet).
+Add a `buildGuideSteps()` entry: `providerName`, `enabledCheck`, `configured` (true when nothing
+needs asking), and `prompts` — `{ key, label }` with a few-word label. The run asks once, with hidden
+input, for each missing key and saves it. The link shown comes from the key's `TOKEN_URLS` entry
+(or the step's `url`); a test fails if a prompt has no link.
 
-## 8. Prerequisites (`infra/prerequisites.ts`) — only if a CLI/token is required
+## 8. Prerequisites (`infra/prerequisites.ts`) — only if a CLI or login is required
 
-Add a `PREREQUISITES` entry (`command`, `versionFlag`, `enabledCheck`, optional
-`tokenEnvKey`). HTTP-only providers (using `fetch`) need nothing here.
+Add a `PREREQUISITES` entry for a CLI (`command`, `versionFlag`, `enabledCheck`, `providerKeys`) and
+a `LOGINS` entry for a login (`tokenKey` in `.setup-credentials` and/or `cliCheck`, plus the `fix` to
+print). HTTP-only providers (using `fetch`) need nothing here.
 
 ## 9. Docs
 
-Add rows to **both** tables in `docs/deployment/setup/setup-token-instructions.md`
-(per-provider token URLs + env-var names). Add the provider to the registry list in
-[SETUP_INFRA_README.md](./SETUP_INFRA_README.md). Run the **docs-maintainer** skill if you
-moved docs.
+Add the provider's credentials and outputs to the tables in
+[SETUP_INFRA_PREREQUISITES.md](./SETUP_INFRA_PREREQUISITES.md), and its key to the registry list in
+[SETUP_INFRA_README.md](./SETUP_INFRA_README.md) (a test fails if it is missing).
 
 ## 10. Verify
 
 ```bash
-pnpm typecheck
+pnpm health                                  # lint, typecheck, tests, identity
 pnpm setup:infra:preview                     # new provider appears in the selected list
 pnpm setup:infra --providers <key>           # exercise just this one
-npx biome check tooling/setup
 ```
 
 ---
 
-> Run the **`setup-infra-maintainer`** skill when adding/removing a provider — it is the
-> authoritative checklist. (Its "edit `PREVIEW_PROVIDERS` / `displaySettingsReview`"
-> guidance is stale: the orchestrator became registry-driven, so steps 5–6 here replace it.)
+> The **`setup-infra-maintainer`** skill has the same checklist for agents; the **`preset-author`**
+> skill covers presets.

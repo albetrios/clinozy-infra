@@ -7,13 +7,13 @@ const neonBranchStateSchema = z.object({
   databaseMigrationUrl: z.string().optional(),
   serviceRoleName: z.string().optional(),
   /**
-   * Password for the SQL-managed runtime role (see `ensureRuntimeRoleViaSql` in
-   * `setup-neon.provider.ts`). Persisted so re-runs reuse the same connection string
-   * across env files, GitHub Environments, and Railway. Absent for state written
-   * by the legacy REST-API role flow — its absence is the signal to re-run the
-   * Neon step and create the new `<env>_app_login` role.
+   * Password for the runtime database user (the backend's app role, created via SQL — see
+   * `ensureLoginRole` in `setup-neon.provider.ts`). Kept so a run reuses the same connection string
+   * across env files, GitHub Environments, and Railway.
    */
   serviceRolePassword: z.string().optional(),
+  /** Pooled URL as the backend's maintenance role. */
+  databaseMaintenanceUrl: z.string().optional(),
 });
 
 const redisDatabaseStateSchema = z.object({
@@ -134,6 +134,14 @@ export const setupStateSchema = z.object({
     .object({
       repository: z.string(),
       secrets: z.array(z.string()),
+    })
+    .optional(),
+  /** The frontend's Netlify site — one site serves every environment (aliases + --prod). */
+  netlify: z
+    .object({
+      siteId: z.string(),
+      siteName: z.string(),
+      url: z.string(),
     })
     .optional(),
   postman: z

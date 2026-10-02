@@ -7,9 +7,10 @@
  * metacharacters (`;`, `$()`, `|`) in it are literal, not executed.
  *
  * Also centralizes repository resolution (env → git remote → gh) that was previously duplicated
- * across environments.ts, rulesets.ts, push-retention-secrets.ts, and sync-github-environments.ts.
+ * across environments.ts, rulesets.ts, and sync-github-environments.ts.
  */
 import { runCommand, type RunCommandResult } from '@setup/common/exec.js';
+import { loadConfig } from '@setup/common/config.js';
 import { SetupError } from '@setup/common/setup-error.js';
 
 export interface GhOptions {
@@ -62,6 +63,17 @@ export function resolveRepository(): string {
   if (process.env.GITHUB_REPOSITORY?.includes('/')) {
     return process.env.GITHUB_REPOSITORY;
   }
+
+  // The backend repository from setup.config.json — the files these scripts sync are read from it
+  // (`targetPath('.github', …)`). Never this tool's own checkout, whose git remote is clinozy-infra.
+  const configured = (() => {
+    try {
+      return loadConfig().providers.github.repository;
+    } catch {
+      return undefined;
+    }
+  })();
+  if (configured?.includes('/')) return configured;
 
   const fromGit = repositoryFromGitRemote();
   if (fromGit) return fromGit;

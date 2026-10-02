@@ -7,12 +7,15 @@
  * NAMING (single source of truth = setup.config.json): organization/project names from
  * `config.project.*`, environment names from `config.environments[].name` — never hardcoded.
  * SECRETS: written to `.env.<environment>` only (via build-env-vars), never printed to the
- * console; setup secret files are gitignored and unreadable by the agent (deny-read guard). See SETUP_INFRA_PROVIDER_TEMPLATE.md.
+ * console; setup secret files are gitignored and written owner-only. See SETUP_INFRA_PROVIDER_TEMPLATE.md.
  */
 import * as logger from '@setup/common/logger.js';
 import { isSecretFilled } from '@setup/common/secrets.js';
 import { setupFetch } from '@setup/common/setup-fetch.js';
 import { resourceStatus } from '@setup/common/interactive-step.js';
+import { plainDnsType, requireDnsRecord } from '@setup/common/dns-requirements.js';
+import { apiHostForEnvironment } from '@setup/envs/env-file-setup.util.js';
+import { ensureCustomDomain, ensureServiceDomain } from '@setup/railway/railway-api.js';
 import type {
   SetupConfig,
   SetupState,
@@ -292,6 +295,8 @@ async function mintProjectToken(options: {
  * image and start command.
  */
 export const RAILWAY_SERVICE_NAMES = ['api', 'worker'];
+/** The service that answers public HTTP (the worker has no inbound traffic). */
+const RAILWAY_PUBLIC_SERVICE = 'api';
 
 function formatRailwayEnvironmentPlan(config: SetupConfig): string {
   return config.environments
@@ -516,6 +521,79 @@ export async function provision(
         attachSpinner,
         `Attached ${pendingServices.length} service(s) to environment "${environmentName}"`,
       );
+    }
+
+    // The backend's public address: a Railway-generated domain on the API service per environment,
+    // reused when present. The frontend build needs it as VITE_API_BASE_URL; a custom domain from
+    // `pnpm setup:domain` still wins downstream (see deployedApiOrigin).
+    for (const environmentName of environments) {
+      const environmentState = railwayEnvironments[environmentName];
+      const apiService = environmentState?.services[RAILWAY_PUBLIC_SERVICE];
+      if (!(environmentState && apiService?.serviceId)) continue;
+      try {
+        const { domain, created } = await ensureServiceDomain(apiToken, {
+          projectId: railwayProjectId,
+          environmentId: environmentState.environmentId,
+          serviceId: apiService.serviceId,
+          targetPort: config.app.port,
+        });
+        environmentState.services[RAILWAY_PUBLIC_SERVICE] = {
+          ...apiService,
+          url: `https://${domain.domain}`,
+        };
+        logger.success(
+          `  API domain for "${environmentName}" ${created ? 'created' : 'found'}: https://${domain.domain}`,
+        );
+
+        // The product's own hostname (`api.<domain>` / `<env>--api.<domain>`), attached on top. It
+        // wins downstream once recorded; Railway issues the certificate when DNS points at it.
+        const customHost = apiHostForEnvironment(config, environmentName);
+        if (customHost) {
+          const { customDomain, created: attached } = await ensureCustomDomain(apiToken, {
+            projectId: railwayProjectId,
+            environmentId: environmentState.environmentId,
+            serviceId: apiService.serviceId,
+            domain: customHost,
+            targetPort: config.app.port,
+          });
+          const current = environmentState.services[RAILWAY_PUBLIC_SERVICE];
+          if (current) {
+            environmentState.services[RAILWAY_PUBLIC_SERVICE] = {
+              ...current,
+              customDomain: {
+                domain: customDomain.domain,
+                customDomainId: customDomain.id,
+                targetPort: config.app.port,
+                verified: customDomain.status.verified,
+                certificateStatus: customDomain.status.certificateStatus,
+                attachedAt: new Date().toISOString(),
+              },
+            };
+          }
+          logger.success(
+            `  Custom API domain for "${environmentName}" ${attached ? 'attached' : 'already attached'}: https://${customHost}${customDomain.status.verified ? '' : ' (waiting for DNS)'}`,
+          );
+          for (const record of customDomain.status.dnsRecords) {
+            const type = plainDnsType(record.recordType);
+            if (type) {
+              requireDnsRecord({
+                provider: 'Railway',
+                type,
+                name: record.fqdn,
+                value: record.requiredValue,
+              });
+            }
+          }
+          if (!customDomain.status.verified) {
+            for (const record of customDomain.status.dnsRecords) {
+              logger.info(`    DNS: ${record.recordType} ${record.fqdn} → ${record.requiredValue}`);
+            }
+          }
+        }
+      } catch (domainError) {
+        const message = domainError instanceof Error ? domainError.message : String(domainError);
+        logger.warn(`  Could not ensure an API domain for "${environmentName}": ${message}`);
+      }
     }
 
     // Mint a per-environment project token for every configured environment.

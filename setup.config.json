@@ -16,13 +16,9 @@
     "protectedBranches": ["main"],
     "defaultBranch": "main"
   },
-  "product": { "name": "clinozy" },
+  "product": { "name": "clinozy", "domain": "clinozy.com" },
   "frontend": {
-    "name": "clinozy-fe",
-    "url": {
-      "development": "http://localhost:5173",
-      "production": "https://clinozy-fe.netlify.app"
-    }
+    "name": "clinozy-fe"
   },
   "environments": [
     {
@@ -82,15 +78,15 @@
     },
     "resend": {
       "enabled": true,
-      "fromAddress": "noreply@ig.albetrios.com",
+      "fromAddress": "",
       "fromName": "Clinozy"
     },
     "stripe": {
-      "enabled": false
+      "enabled": true
     },
     "oauth": {
       "google": {
-        "enabled": false
+        "enabled": true
       },
       "github": {
         "enabled": true
@@ -116,6 +112,9 @@
     },
     "scalar": {
       "enabled": true
+    },
+    "netlify": {
+      "enabled": true
     }
   },
   "app": {
@@ -126,13 +125,7 @@
       "production": 100
     },
     "rateLimitWindowMs": 60000,
-    "frontendUrl": {
-      "development": "http://localhost:3000",
-      "production": ""
-    },
-    "allowedOrigins": {
-      "development": "http://localhost:3000,https://development--clinozy-fe.netlify.app",
-      "production": "https://clinozy-fe.netlify.app"
-    }
+    "frontendUrl": {},
+    "allowedOrigins": {}
   }
 }

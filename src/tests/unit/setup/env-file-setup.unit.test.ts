@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import type { SetupConfig } from '@setup/common/types.js';
+import type { SetupConfig, SetupState } from '@setup/common/types.js';
 import {
+  deployedApiOrigin,
   defaultCollectionDecision,
   oauthCallbackUrl,
   parseEnvironmentCollectionDecision,
@@ -10,6 +11,11 @@ import { usesEnvironmentFirstTraversal } from '@setup/common/interactive-step.js
 
 function configWithOrigins(frontendUrl: Record<string, string>): SetupConfig {
   return {
+    environments: [
+      { name: 'development', nodeEnvironment: 'development' },
+      { name: 'production', nodeEnvironment: 'production' },
+    ],
+    providers: {},
     frontend: { name: 'clinozy-fe', url: frontendUrl },
     // The API origin must never leak into the redirect URI.
     app: { frontendUrl: { development: 'http://localhost:3000', production: 'https://api.x.io' } },
@@ -108,6 +114,13 @@ describe('resolveNonInteractiveFieldValue', () => {
     );
   });
 
+  it('never uses the shared key for a per-environment field', () => {
+    const env = { STRIPE_SECRET_KEY: 'sk_test_from_shell' };
+    expect(
+      resolveNonInteractiveFieldValue('STRIPE_SECRET_KEY', 'production', env, { shared: false }),
+    ).toBeUndefined();
+  });
+
   it('trims whitespace and treats blank as unset', () => {
     expect(resolveNonInteractiveFieldValue('K', 'development', { K: '  v  ' })).toBe('v');
     expect(resolveNonInteractiveFieldValue('K', 'development', { K: '   ' })).toBeUndefined();
@@ -115,5 +128,45 @@ describe('resolveNonInteractiveFieldValue', () => {
 
   it('returns undefined when neither key is present (keeps the on-disk value)', () => {
     expect(resolveNonInteractiveFieldValue('K', 'development', {})).toBeUndefined();
+  });
+});
+
+describe('deployedApiOrigin (what the hosted frontend calls)', () => {
+  const stateWith = (api: Record<string, unknown>): SetupState =>
+    ({
+      version: 1,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      railway: {
+        projectId: 'p',
+        services: {},
+        environments: {
+          production: { environmentId: 'e', services: { api: { serviceId: 's', ...api } } },
+        },
+      },
+    }) as unknown as SetupState;
+
+  it('prefers a custom domain over the Railway-generated one', () => {
+    const state = stateWith({
+      url: 'https://api-production-1234.up.railway.app',
+      customDomain: { domain: 'api.acme.test' },
+    });
+    expect(deployedApiOrigin(state, 'production')).toBe('https://api.acme.test');
+  });
+
+  it('falls back to the generated domain, adding the scheme when it is missing', () => {
+    expect(
+      deployedApiOrigin(stateWith({ url: 'https://api-x.up.railway.app' }), 'production'),
+    ).toBe('https://api-x.up.railway.app');
+    expect(deployedApiOrigin(stateWith({ url: 'api-x.up.railway.app' }), 'production')).toBe(
+      'https://api-x.up.railway.app',
+    );
+  });
+
+  it('is empty when nothing is deployed for that environment', () => {
+    expect(deployedApiOrigin(stateWith({}), 'production')).toBe('');
+    expect(
+      deployedApiOrigin(stateWith({ url: 'https://api-x.up.railway.app' }), 'development'),
+    ).toBe('');
   });
 });

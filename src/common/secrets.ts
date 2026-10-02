@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { toolRoot } from '@setup/common/paths.js';
 import { ensureSecretDir, writeSecretFile } from '@setup/common/secure-file.js';
 import { resolve } from 'node:path';
@@ -52,12 +53,66 @@ const SIMPLE_VARS: Array<[string, string]> = [
   ['CLOUDFLARE_ACCOUNT_ID', TOKEN_URLS.CLOUDFLARE_ACCOUNT_ID ?? ''],
 ];
 
+/**
+ * App secrets that differ per environment and that setup cannot create (no API mints them). They
+ * live here as `KEY__<environment>`; setup writes each into the backend's `.env.<environment>` (the
+ * Stripe publishable key also into the frontend's, as VITE_STRIPE_PUBLISHABLE_KEY). Templated only
+ * for enabled providers.
+ */
+const PER_ENVIRONMENT_VARS: ReadonlyArray<{
+  title: string;
+  url: string;
+  hint: string;
+  keys: readonly string[];
+  enabled: (config: SetupConfig) => boolean;
+}> = [
+  {
+    title: 'Stripe',
+    url: 'https://dashboard.stripe.com/apikeys',
+    hint: 'development: a Sandbox (sk_test_/pk_test_) · production: live mode (sk_live_/pk_live_) · webhook secret: Developers → Webhooks → the endpoint setup lists',
+    keys: ['STRIPE_SECRET_KEY', 'STRIPE_PUBLISHABLE_KEY', 'STRIPE_WEBHOOK_SECRET'],
+    enabled: (config) => config.providers.stripe.enabled,
+  },
+  {
+    title: 'Google sign-in',
+    url: 'https://console.cloud.google.com/apis/credentials',
+    hint: 'one Web-application OAuth client per environment; setup prints the redirect URI to register',
+    keys: ['OAUTH_GOOGLE_CLIENT_ID', 'OAUTH_GOOGLE_CLIENT_SECRET'],
+    enabled: (config) => config.providers.oauth.google.enabled,
+  },
+];
+
+/** The per-environment blocks for enabled providers, keeping only keys not in `existingKeys`. */
+function perEnvironmentBlocks(
+  config: SetupConfig,
+  existingKeys: ReadonlySet<string> = new Set(),
+): { blocks: string[]; keys: string[] } {
+  const blocks: string[] = [];
+  const keys: string[] = [];
+  for (const group of PER_ENVIRONMENT_VARS.filter((entry) => entry.enabled(config))) {
+    const missing = config.environments.flatMap((environment) =>
+      group.keys
+        .map((key) => `${key}__${environment.name}`)
+        .filter((key) => !existingKeys.has(key)),
+    );
+    if (missing.length === 0) continue;
+    blocks.push(
+      [`# ${group.title} — per environment: ${group.url}`, `# ${group.hint}`]
+        .concat(missing.map((key) => `${key}=`))
+        .join('\n'),
+    );
+    keys.push(...missing);
+  }
+  return { blocks, keys };
+}
+
+/** Every per-environment key templated for `config` (exported for tests). */
+export function perEnvironmentCredentialKeys(config: SetupConfig): string[] {
+  return perEnvironmentBlocks(config).keys;
+}
+
 // ─── Zod schemas ────────────────────────────────────────────────────────────
 
-// NOTE: app-level per-environment secrets are entered directly in `.env.<environment>` (NOT in
-// `.setup/.setup-credentials` — no env-suffixed keys here):
-//   - OAuth (Google + GitHub): validated by reading the env files.
-//   - Stripe: prompted from stdin and written as STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET.
 // Cloudflare Turnstile is PROVISIONED: setup uses CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID to
 // create one widget per environment and writes CAPTCHA_SITE_KEY / CAPTCHA_SECRET into each env file.
 
@@ -115,6 +170,18 @@ export const setupSecretsSchema = z.object({
    * namespace is auto-resolved from the token (the active team); slug defaults to the project
    * name. `namespace` / `slug` are optional pins for multi-team accounts or a custom slug.
    */
+  /**
+   * GitHub token (`GITHUB_TOKEN`). Besides driving `gh` for repo/env setup, it is the token the
+   * apps' release automation uses: emitted as `RELEASE_PLEASE_TOKEN` (GitHub offers no API to mint
+   * a personal token, so the one the operator already provided is the source).
+   */
+  github: z.object({ token: z.string().optional() }),
+  /**
+   * Netlify token — always from the Netlify CLI's login (`netlify login`), never from
+   * `.setup-credentials`. Finds/creates the frontend site and is emitted into the frontend env as
+   * NETLIFY_AUTH_TOKEN, where the frontend's CI uses it to deploy.
+   */
+  netlify: z.object({ authToken: z.string().optional() }),
   scalar: z.object({
     /** Account API key used by `scalar auth login --token`. */
     apiKey: z.string().optional(),
@@ -171,6 +238,52 @@ function get(source: Record<string, string>, key: string): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+/** Where the Netlify CLI keeps its login (`netlify login`), per platform. */
+function netlifyCliConfigPath(): string {
+  if (process.platform === 'darwin') {
+    return resolve(homedir(), 'Library', 'Preferences', 'netlify', 'config.json');
+  }
+  if (process.platform === 'win32') {
+    return resolve(process.env.APPDATA ?? homedir(), 'netlify', 'Config', 'config.json');
+  }
+  return resolve(
+    process.env.XDG_CONFIG_HOME ?? resolve(homedir(), '.config'),
+    'netlify',
+    'config.json',
+  );
+}
+
+/**
+ * The active user's token from the Netlify CLI config text (`{ userId, users: { <id>: { auth:
+ * { token } } } }`), or '' when there is no usable login. Mirrors how the GitHub and Railway CLIs
+ * stand in for a token elsewhere in setup.
+ */
+export function netlifyTokenFromCliConfig(configText: string): string {
+  try {
+    const parsed = JSON.parse(configText) as {
+      userId?: string;
+      users?: Record<string, { auth?: { token?: string } }>;
+    };
+    const token = parsed.userId ? parsed.users?.[parsed.userId]?.auth?.token : undefined;
+    return typeof token === 'string' ? token.trim() : '';
+  } catch {
+    return '';
+  }
+}
+
+/** How to log in when there is no Netlify CLI login on this machine (no global install needed). */
+export const NETLIFY_LOGIN_COMMAND = 'npx netlify-cli login';
+
+function netlifyCliToken(): string {
+  const path = netlifyCliConfigPath();
+  if (!existsSync(path)) return '';
+  try {
+    return netlifyTokenFromCliConfig(readFileSync(path, 'utf-8'));
+  } catch {
+    return '';
+  }
+}
+
 // ─── Load secrets from .setup-credentials ────────────────────────────────────
 
 export function loadSecretsFromEnv(_environmentNames: string[]): SetupSecrets {
@@ -194,6 +307,8 @@ export function loadSecretsFromEnv(_environmentNames: string[]): SetupSecrets {
     postman: {
       apiKey: get(source, 'POSTMAN_API_KEY') || undefined,
     },
+    github: { token: get(source, 'GITHUB_TOKEN') || undefined },
+    netlify: { authToken: netlifyCliToken() || undefined },
     scalar: {
       apiKey: get(source, 'SCALAR_API_KEY') || undefined,
       namespace: get(source, 'SCALAR_NAMESPACE') || undefined,
@@ -231,13 +346,21 @@ export function getEnvSetupValue(key: string): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+/** The sign-up/token page for a `.setup-credentials` key (its `TOKEN_URLS` entry, URL only). */
+export function credentialUrl(key: string): string | undefined {
+  return TOKEN_URLS[key]?.split(' ')[0];
+}
+
+/** Write `key=value` into `.setup-credentials` and into this process, so the running setup sees it. */
 export function setEnvSetupVariable(key: string, value: string): void {
+  process.env[key] = value;
   if (!existsSync(ENV_SETUP_PATH)) return;
   let content = readFileSync(ENV_SETUP_PATH, 'utf-8');
   const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const lineRegex = new RegExp(`^(${escapedKey}=).*`, 'm');
   if (lineRegex.test(content)) {
-    content = content.replace(lineRegex, `$1${value}`);
+    // A replacer function: a `$&` / `$1` inside the value must be written literally.
+    content = content.replace(lineRegex, (_line, prefix: string) => `${prefix}${value}`);
   } else {
     const comment = TOKEN_URLS[key as keyof typeof TOKEN_URLS] ?? key;
     content = `${content.trimEnd()}\n\n# ${comment}\n${key}=${value}\n`;
@@ -303,19 +426,12 @@ export function buildEnvSetupTemplateContent(config: SetupConfig): string {
     lines.push('');
   }
 
-  // App-level per-environment secrets are NOT templated here — the environment is the
-  // `.env.<environment>` file, not a key suffix. Setup prompts for these from stdin at apply time
-  // (or you enter them directly in each env file):
-  lines.push(
-    '# App per-environment secrets are prompted at apply and written to .env.<environment>',
-  );
-  lines.push('#   (NOT here — the environment is the file, not a key suffix):');
-  lines.push(
-    '#   Stripe:    STRIPE_SECRET_KEY=  STRIPE_WEBHOOK_SECRET=  (test in dev, live in prod)',
-  );
-  lines.push(
-    '#   OAuth:     OAUTH_GOOGLE_CLIENT_ID/_CLIENT_SECRET/_REDIRECT_URI  (+ OAUTH_GITHUB_*)',
-  );
+  for (const block of perEnvironmentBlocks(config).blocks) {
+    lines.push(block);
+    lines.push('');
+  }
+
+  lines.push('# Provisioned by setup — nothing to paste:');
   lines.push(
     '#   Turnstile: CAPTCHA_* are PROVISIONED from CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID',
   );
@@ -335,27 +451,62 @@ export function writeEnvSetupTemplateIfMissing(config: SetupConfig): boolean {
   return true;
 }
 
-export function appendMissingEnvSetupVariables(_config: SetupConfig): string[] {
+export function appendMissingEnvSetupVariables(config: SetupConfig): string[] {
   if (!existsSync(ENV_SETUP_PATH)) return [];
   const content = readFileSync(ENV_SETUP_PATH, 'utf-8');
   const existingKeys = new Set(Object.keys(parseEnvFile(content)));
   const appended: string[] = [];
   const blocks: string[] = [];
 
-  // Only account-wide, env-agnostic credential keys are templated. App per-environment secrets
-  // (Stripe / OAuth / Turnstile-via-Cloudflare) are prompted/provisioned into `.env.<environment>`.
   for (const [key, url] of SIMPLE_VARS) {
     if (!existingKeys.has(key)) {
       blocks.push(`# ${url}\n${key}=`);
       appended.push(key);
     }
   }
+  const perEnvironment = perEnvironmentBlocks(config, existingKeys);
+  blocks.push(...perEnvironment.blocks);
+  appended.push(...perEnvironment.keys);
 
   if (blocks.length === 0) return [];
   const trimmed = content.trimEnd();
   const suffix = trimmed.endsWith('\n') ? '' : '\n';
   writeSecretFile(ENV_SETUP_PATH, `${trimmed + suffix}\n${blocks.join('\n\n')}\n`);
   return appended;
+}
+
+/** `.setup-credentials` keys setup no longer reads — removed (with their comment line) on a run. */
+const RETIRED_ENV_SETUP_KEYS = [
+  // Netlify uses the CLI login only (`netlify login`).
+  'NETLIFY_AUTH_TOKEN',
+] as const;
+
+/** `content` without the retired keys' `KEY=…` lines and the `#` comment line right above each. */
+export function withoutRetiredEnvSetupKeys(content: string): {
+  content: string;
+  removed: string[];
+} {
+  const lines = content.split('\n');
+  const removed: string[] = [];
+  const kept: string[] = [];
+  for (const line of lines) {
+    const key = RETIRED_ENV_SETUP_KEYS.find((retired) => line.startsWith(`${retired}=`));
+    if (!key) {
+      kept.push(line);
+      continue;
+    }
+    removed.push(key);
+    if (kept.at(-1)?.startsWith('#')) kept.pop();
+  }
+  return { content: kept.join('\n'), removed };
+}
+
+/** Drop retired keys from `.setup/.setup-credentials`; returns the keys removed. */
+export function removeRetiredEnvSetupVariables(): string[] {
+  if (!existsSync(ENV_SETUP_PATH)) return [];
+  const result = withoutRetiredEnvSetupKeys(readFileSync(ENV_SETUP_PATH, 'utf-8'));
+  if (result.removed.length > 0) writeSecretFile(ENV_SETUP_PATH, result.content);
+  return result.removed;
 }
 
 export function ensureEnvSetupTemplate(config: SetupConfig): boolean {

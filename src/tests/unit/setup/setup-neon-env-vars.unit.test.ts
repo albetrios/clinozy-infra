@@ -5,8 +5,13 @@ import { setupNeonProvider } from '@setup/infra/providers/setup-neon/setup-neon.
 const POOLED = 'postgresql://svc:pw@ep-x-pooler.c-3.us-east-2.aws.neon.tech/neondb?sslmode=require';
 const DIRECT = 'postgresql://owner:pw@ep-x.c-3.us-east-2.aws.neon.tech/neondb?sslmode=require';
 
-function envVars(branch: { databaseUrl: string; databaseMigrationUrl?: string } | undefined) {
+function envVars(
+  branch: { databaseUrl: string; databaseMigrationUrl?: string } | undefined,
+  neonApiKey = '',
+) {
   const context = {
+    config: { providers: { neon: { enabled: true } } },
+    secrets: { neon: { apiKey: neonApiKey } },
     state: { neon: { branches: branch ? { development: branch } : {} } },
   } as unknown as InfraProviderContext;
   return setupNeonProvider.toEnvironmentVariables?.(context, 'development');
@@ -32,5 +37,15 @@ describe('setupNeonProvider.toEnvironmentVariables', () => {
 
   it('returns {} when the environment has no Neon branch', () => {
     expect(envVars(undefined)).toEqual({});
+  });
+
+  it('hands the restore drill its Neon key, with or without a recorded branch', () => {
+    expect(envVars(undefined, 'fake-neon-key')).toEqual({
+      MONTHLY_DATABASE_RESTORE_DRILL_NEON_API_KEY: 'fake-neon-key',
+    });
+    expect(envVars({ databaseUrl: POOLED }, 'fake-neon-key')).toMatchObject({
+      DATABASE_URL: POOLED,
+      MONTHLY_DATABASE_RESTORE_DRILL_NEON_API_KEY: 'fake-neon-key',
+    });
   });
 });

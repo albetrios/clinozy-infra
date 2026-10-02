@@ -1,11 +1,13 @@
 import { createInterface } from 'node:readline';
 import * as logger from '@setup/common/logger.js';
+import { runNextSteps } from './next-steps.js';
 import { isAssumeYes } from '@setup/common/prompts.js';
 import { loadConfig, getEnvironmentNames, getConfigPath } from '@setup/common/config.js';
 import {
   loadSecrets,
   getSecretsPath,
   ensureEnvSetupTemplate,
+  removeRetiredEnvSetupVariables,
   envSetupFileExists,
 } from '@setup/common/secrets.js';
 import { hasAnyEnvSecret } from '@setup/common/secrets.js';
@@ -334,14 +336,23 @@ export async function runProvision(options: ProvisionOptions = {}): Promise<void
   }
   logger.blank();
 
-  if (!checkPrerequisites(config, new Set(selectedProviders.map((provider) => provider.key)))) {
-    throw new SetupError('Prerequisites not met.');
+  // The credentials file first: the prerequisites check reads it (logins, credentials).
+  if (ensureEnvSetupTemplate(config)) {
+    // Interactive runs ask for each value next (the guide); a non-interactive one cannot.
+    if (!process.stdin.isTTY) {
+      throw new SetupAbort(
+        'Generated .setup/.setup-credentials template. Fill the values (see URLs in the file) and run pnpm setup:infra again.',
+      );
+    }
+    logger.info('Created .setup/.setup-credentials — setup asks for each value below.');
+  }
+  for (const key of removeRetiredEnvSetupVariables()) {
+    logger.info(`Removed ${key} from .setup/.setup-credentials — setup no longer reads it.`);
   }
 
-  if (ensureEnvSetupTemplate(config)) {
-    throw new SetupAbort(
-      'Generated .setup/.setup-credentials template. Fill the values (see URLs in the file) and run pnpm setup:infra again.',
-    );
+  const selectedKeys = new Set(selectedProviders.map((provider) => provider.key));
+  if (!(await checkPrerequisites(config, selectedKeys))) {
+    throw new SetupError('Prerequisites not met.');
   }
 
   // Decide which environments to set up ONCE — asked a single time here and honored by BOTH the
@@ -368,7 +379,7 @@ export async function runProvision(options: ProvisionOptions = {}): Promise<void
     activeEnvironments = selectedEnvironments;
   }
 
-  await runGuide(config, activeEnvironments);
+  await runGuide(config, activeEnvironments, selectedKeys);
 
   const secrets = loadSecrets(config);
   const state = loadState();
@@ -522,6 +533,9 @@ export async function runProvision(options: ProvisionOptions = {}): Promise<void
   } else {
     logger.success('Setup completed successfully! All resources provisioned.');
   }
+
+  // What setup cannot do itself, one step at a time, with live status.
+  await runNextSteps(context.config);
 
   const summaryItems: Array<{ label: string; value: string | string[] }> = [];
 

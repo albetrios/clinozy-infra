@@ -10,7 +10,7 @@
  * NAMING (single source of truth = setup.config.json): organization/project names from
  * `config.project.*`, environment names from `config.environments[].name` — never hardcoded.
  * SECRETS: written to `.env.<environment>` only, never printed to the console; setup secret files
- * are gitignored and unreadable by the agent (deny-read guard). See SETUP_INFRA_PROVIDER_TEMPLATE.md.
+ * are gitignored and written owner-only. See SETUP_INFRA_PROVIDER_TEMPLATE.md.
  */
 import { isSecretFilled } from '@setup/common/secrets.js';
 import { resourceStatus } from '@setup/common/interactive-step.js';
@@ -36,6 +36,15 @@ const TOKEN_URL = 'https://dash.cloudflare.com/profile/api-tokens';
 interface TurnstileWidget {
   sitekey: string;
   name: string;
+  domains?: string[];
+  mode?: string;
+}
+
+/** True when both lists hold the same hostnames, in any order. */
+export function sameDomains(current: readonly string[], desired: readonly string[]): boolean {
+  const left = new Set(current.map((domain) => domain.toLowerCase()));
+  const right = new Set(desired.map((domain) => domain.toLowerCase()));
+  return left.size === right.size && [...left].every((domain) => right.has(domain));
 }
 interface TurnstileWidgetWithSecret extends TurnstileWidget {
   secret: string;
@@ -127,8 +136,20 @@ async function provisionTurnstile(context: InfraProviderContext): Promise<Provid
     const name = widgetName(context.config, environmentName);
     const found = existing.find((widget) => widget.name === name);
     const onFileSecret = readEnvFileValue(environmentName, 'CAPTCHA_SECRET');
+    const desiredDomains = domainsForEnvironment(context.config, environmentName);
 
     try {
+      // An existing widget keeps the domains it was created with; when the frontend or API host
+      // changes (e.g. product.domain added), update them in place — site key and secret stay.
+      if (found && !sameDomains(found.domains ?? [], desiredDomains)) {
+        await cloudflareApi<TurnstileWidget>(apiToken, `${widgetsPath}/${found.sitekey}`, {
+          method: 'PUT',
+          body: JSON.stringify({ name, domains: desiredDomains, mode: found.mode ?? 'managed' }),
+        });
+        logger.success(
+          `  Turnstile "${environmentName}" — domains updated: ${desiredDomains.join(', ')}`,
+        );
+      }
       if (found && onFileSecret) {
         // Already provisioned and we still hold its secret — keep it (don't rotate every run).
         upsertEnvFileValue(environmentName, 'CAPTCHA_PROVIDER', 'turnstile');
@@ -150,11 +171,7 @@ async function provisionTurnstile(context: InfraProviderContext): Promise<Provid
       } else {
         widget = await cloudflareApi<TurnstileWidgetWithSecret>(apiToken, widgetsPath, {
           method: 'POST',
-          body: JSON.stringify({
-            name,
-            domains: domainsForEnvironment(context.config, environmentName),
-            mode: 'managed',
-          }),
+          body: JSON.stringify({ name, domains: desiredDomains, mode: 'managed' }),
         });
         logger.success(`  Turnstile "${environmentName}" — created widget "${name}"`);
       }

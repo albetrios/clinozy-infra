@@ -74,7 +74,17 @@ export const setupConfigSchema = z.object({
    * Turnstile widget) — named `<product.name>-<env>` (e.g. `clinozy-development`). Optional;
    * defaults to `project.name` so existing configs keep backend-centric naming.
    */
-  product: z.object({ name: z.string().min(1) }).optional(),
+  product: z
+    .object({
+      name: z.string().min(1),
+      // The product's own domain (e.g. `clinozy.com`) — the single source for every public address:
+      // app.<domain> / api.<domain> in production, <env>--api.<domain> elsewhere, noreply@<domain>.
+      domain: z
+        .string()
+        .regex(/^(?!-)[a-z0-9-]+(\.[a-z0-9-]+)+$/, 'must be a bare domain like example.com')
+        .optional(),
+    })
+    .optional(),
   /**
    * Frontend (clinozy-fe) identity. `name` is the frontend's Sentry project (separate from the
    * backend project); `url` is the per-environment frontend origin (used for the Turnstile widget
@@ -170,6 +180,9 @@ export const setupConfigSchema = z.object({
     }),
     postman: z.object({ enabled: z.boolean() }),
     scalar: z.object({ enabled: z.boolean() }),
+    // The frontend's Netlify site — found (or created) from `frontend.url.production`. Optional so
+    // configs that predate it keep loading; absent means disabled.
+    netlify: z.object({ enabled: z.boolean() }).optional(),
   }),
   app: z.object({
     port: z.number().int().default(3000),
@@ -282,6 +295,12 @@ export function loadConfig(): z.infer<typeof setupConfigSchema> {
   }
   // Surfaces the specific JSON/schema error instead of a generic "not found or invalid".
   return parseAndNormalizeConfig(readFileSync(CONFIG_PATH, 'utf-8'));
+}
+
+/** The frontend's GitHub repository: the backend repository's owner + `frontend.name`. */
+export function frontendRepository(config: ParsedSetupConfig): string | undefined {
+  const owner = config.providers.github.repository.split('/')[0];
+  return owner && config.frontend?.name ? `${owner}/${config.frontend.name}` : undefined;
 }
 
 export function getEnvironmentNames(config: z.infer<typeof setupConfigSchema>): string[] {

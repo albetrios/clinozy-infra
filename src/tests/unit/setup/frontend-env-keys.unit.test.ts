@@ -7,6 +7,8 @@ import {
   FRONTEND_ENV_KEY_MAPPINGS,
   FRONTEND_FALLBACK_HEADER,
   buildFrontendEnvContent,
+  ciDeploySecrets,
+  retiredFrontendKeys,
   freshFrontendValues,
   frontendEnvFileName,
 } from '@setup/envs/frontend-env-keys.js';
@@ -124,7 +126,30 @@ describe('frontend env export (surgical)', () => {
     expect(content).toContain('VITE_CAPTCHA_DISABLED=false');
   });
 
-  it('writes build-time SENTRY_ORG + SENTRY_PROJECT from config; never the auth token', () => {
+  it('writes VITE_API_BASE_URL from the deployed API recorded by the Railway provider', () => {
+    const withApi = {
+      ...stateWithPosthog,
+      railway: {
+        projectId: 'p',
+        services: {},
+        environments: {
+          development: {
+            environmentId: 'e',
+            services: { api: { serviceId: 's', url: 'https://api-dev-1234.up.railway.app' } },
+          },
+        },
+      },
+    } as unknown as SetupState;
+    expect(freshFrontendValues('development', baseConfig, emptySecrets, withApi)).toMatchObject({
+      VITE_API_BASE_URL: 'https://api-dev-1234.up.railway.app',
+    });
+    // Nothing recorded → nothing written, so an existing value is kept.
+    expect(
+      freshFrontendValues('development', baseConfig, emptySecrets, stateWithPosthog),
+    ).not.toHaveProperty('VITE_API_BASE_URL');
+  });
+
+  it('writes build-time SENTRY_ORG + SENTRY_PROJECT from config', () => {
     const existing = [
       'SENTRY_AUTH_TOKEN=',
       'SENTRY_ORG=',
@@ -145,11 +170,69 @@ describe('frontend env export (surgical)', () => {
 
     expect(content).toContain('SENTRY_ORG=albetrios-7j'); // config.providers.sentry.organization
     expect(content).toContain('SENTRY_PROJECT=clinozy-fe'); // config.frontend.name
-    // The secret half is NEVER emitted — its line stays blank.
+    // No Sentry token in the setup credentials → nothing to write; the blank line stays blank.
     expect(content).not.toMatch(/SENTRY_AUTH_TOKEN=.+/);
   });
 
   it('exposes every mapped Vite key name for downstream consumers', () => {
     expect(FRONTEND_ENV_KEY_MAPPINGS.map((m) => m.vite)).toContain('VITE_POSTHOG_KEY');
+  });
+});
+
+describe('CI deploy secrets for the frontend', () => {
+  const secrets = {
+    sentry: { authToken: 'fake-sentry-token' },
+    github: { token: 'fake-github-token' },
+    netlify: { authToken: 'fake-netlify-token' },
+  } as unknown as SetupSecrets;
+  const withSite: SetupState = {
+    ...stateWithPosthog,
+    netlify: { siteId: 'site-123', siteName: 'acme-fe', url: 'https://acme-fe.netlify.app' },
+  };
+  const config = (providers: Record<string, unknown>): SetupConfig =>
+    ({
+      ...baseConfig,
+      providers: { ...disabledProviders, ...providers },
+    }) as unknown as SetupConfig;
+  const allOn = config({
+    netlify: { enabled: true },
+    sentry: { ...disabledProviders.sentry, enabled: true },
+    github: { ...disabledProviders.github, enabled: true },
+  });
+
+  it('writes the Netlify pair, the Sentry token and the release token when their providers are on', () => {
+    expect(ciDeploySecrets('development', allOn, secrets, withSite)).toEqual({
+      NETLIFY_SITE_ID: 'site-123',
+      NETLIFY_AUTH_TOKEN: 'fake-netlify-token',
+      SENTRY_AUTH_TOKEN: 'fake-sentry-token',
+      RELEASE_PLEASE_TOKEN: 'fake-github-token',
+    });
+  });
+
+  it('gives the release token to the default (development) environment only', () => {
+    const production = ciDeploySecrets('production', allOn, secrets, withSite);
+    expect(production).not.toHaveProperty('RELEASE_PLEASE_TOKEN');
+    expect(production).toMatchObject({ NETLIFY_SITE_ID: 'site-123' });
+  });
+
+  it('writes nothing for a disabled provider or a value it does not have', () => {
+    expect(ciDeploySecrets('development', config({}), secrets, withSite)).toEqual({});
+    expect(ciDeploySecrets('development', allOn, emptySecrets, stateWithPosthog)).toEqual({});
+    // Site not provisioned yet in this run: the token still goes out, the id waits for the site.
+    expect(
+      ciDeploySecrets(
+        'development',
+        config({ netlify: { enabled: true } }),
+        secrets,
+        stateWithPosthog,
+      ),
+    ).toEqual({ NETLIFY_AUTH_TOKEN: 'fake-netlify-token' });
+  });
+});
+
+describe('retiredFrontendKeys', () => {
+  it('removes the release token everywhere but the default environment', () => {
+    expect(retiredFrontendKeys('development', baseConfig)).toEqual([]);
+    expect(retiredFrontendKeys('production', baseConfig)).toEqual(['RELEASE_PLEASE_TOKEN']);
   });
 });

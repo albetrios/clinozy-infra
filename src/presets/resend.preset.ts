@@ -4,13 +4,74 @@
  * Validates the Resend API key (no resource is created — Resend exposes a single org-level key)
  * and contributes EMAIL_FROM_* (config-derived) + RESEND_API_KEY (once present) to the env files.
  */
+import { plainDnsType, requireDnsRecord } from '@setup/common/dns-requirements.js';
+import * as logger from '@setup/common/logger.js';
 import { resolveResendFromAddress, resolveResendFromName } from '@setup/common/resend-from.js';
 import { isSecretFilled } from '@setup/common/secrets.js';
 import { setupFetch } from '@setup/common/setup-fetch.js';
 import type { EnvironmentVariables, ProviderResult } from '@setup/common/types.js';
 import type { ValidatePreset } from './types.js';
 
-async function validateResend(apiKey: string): Promise<ProviderResult> {
+type FetchImplementation = (url: string, init?: RequestInit) => Promise<Response>;
+
+interface ResendDomain {
+  id: string;
+  name: string;
+  status: string;
+  records?: Array<{ type: string; name: string; value: string; priority?: number }>;
+}
+
+/**
+ * Make sure the sender's domain is registered with Resend (created when missing), and print the
+ * DNS records it still needs. Mail from an unregistered or unverified domain is rejected, so a
+ * derived `noreply@<product.domain>` is only usable once this — and the DNS — is done.
+ */
+export async function ensureResendSenderDomain(
+  apiKey: string,
+  domain: string,
+  fetchImplementation?: FetchImplementation,
+): Promise<{ status: string; created: boolean }> {
+  const call = async (path: string, init?: RequestInit) =>
+    setupFetch({
+      name: 'Resend',
+      url: `https://api.resend.com${path}`,
+      init: {
+        ...init,
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      },
+      expectedStatus: [200, 201],
+      ...(fetchImplementation ? { fetchImplementation } : {}),
+    });
+  const list = (await (await call('/domains')).json()) as { data?: ResendDomain[] };
+  const found = list.data?.find((entry) => entry.name.toLowerCase() === domain.toLowerCase());
+  const detail = found
+    ? ((await (await call(`/domains/${found.id}`)).json()) as ResendDomain)
+    : ((await (
+        await call('/domains', { method: 'POST', body: JSON.stringify({ name: domain }) })
+      ).json()) as ResendDomain);
+  for (const record of detail.records ?? []) {
+    const type = plainDnsType(record.type);
+    if (!type) continue;
+    const name = !record.name || record.name === '@' ? domain : `${record.name}.${domain}`;
+    requireDnsRecord({
+      provider: 'Resend',
+      type,
+      name,
+      value: record.value,
+      ...(record.priority ? { priority: record.priority } : {}),
+    });
+  }
+  if (detail.status !== 'verified') {
+    for (const record of detail.records ?? []) {
+      logger.info(
+        `    DNS: ${record.type} ${record.name} → ${record.value}${record.priority ? ` (priority ${record.priority})` : ''}`,
+      );
+    }
+  }
+  return { status: detail.status, created: !found };
+}
+
+async function validateResend(apiKey: string, senderDomain?: string): Promise<ProviderResult> {
   if (!apiKey) return { success: true, message: 'Resend: skipped (no API key)' };
   await setupFetch({
     name: 'Resend',
@@ -18,7 +79,12 @@ async function validateResend(apiKey: string): Promise<ProviderResult> {
     init: { headers: { Authorization: `Bearer ${apiKey}` } },
     expectedStatus: 200,
   });
-  return { success: true, message: 'Resend: API key validated' };
+  if (!senderDomain) return { success: true, message: 'Resend: API key validated' };
+  const { status, created } = await ensureResendSenderDomain(apiKey, senderDomain);
+  return {
+    success: true,
+    message: `Resend: API key validated; sender domain ${senderDomain} ${created ? 'added' : 'registered'} (${status})`,
+  };
 }
 
 export const resendPreset: ValidatePreset = {
@@ -56,5 +122,9 @@ export const resendPreset: ValidatePreset = {
     if (secrets.resend.apiKey) vars.RESEND_API_KEY = secrets.resend.apiKey;
     return vars;
   },
-  validate: ({ secrets }) => validateResend(secrets.resend.apiKey),
+  validate: ({ config, secrets }) =>
+    validateResend(
+      secrets.resend.apiKey,
+      resolveResendFromAddress(config).split('@')[1] || undefined,
+    ),
 };

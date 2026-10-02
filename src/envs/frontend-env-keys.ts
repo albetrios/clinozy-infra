@@ -3,16 +3,16 @@
  *
  * clinozy-fe is a fully independent target: these are written straight into the frontend repo's own
  * `.env.<environment>` (resolved via {@link frontendRoot}) via a SURGICAL upsert — only the mapped
- * `VITE_*` keys plus the build-time Sentry identifiers (`SENTRY_ORG`, `SENTRY_PROJECT`) are written;
- * every other clinozy-fe key, comment, and blank line is preserved byte-for-byte. The Sentry *auth
- * token* is a CI-only secret and is deliberately NEVER emitted here. Mirrors the backend upsert in
- * `export-env-files.ts`.
+ * `VITE_*` keys, the build-time Sentry identifiers (`SENTRY_ORG`, `SENTRY_PROJECT`) and the CI deploy
+ * secrets (see {@link ciDeploySecrets}) are written; every other clinozy-fe key, comment, and blank
+ * line is preserved byte-for-byte. Mirrors the backend upsert in `export-env-files.ts`.
  */
 import { resolve } from 'node:path';
 import { frontendRoot } from '@setup/common/paths.js';
 import type { SetupConfig, SetupSecrets, SetupState } from '@setup/common/types.js';
 import { upsertEnvContent } from '@setup/engine/index.js';
 import { resolveEnvironmentVariables } from '@setup/envs/build-env-vars.js';
+import { deployedApiOrigin } from '@setup/envs/env-file-setup.util.js';
 import { escapeEnvValue } from '@setup/envs/env-file-format.util.js';
 
 /** Canonical backend key → Vite env name for clinozy-fe. All values are public (browser-safe). */
@@ -40,6 +40,57 @@ export function frontendEnvFilePath(environmentName: string): string {
 }
 
 /**
+ * CI-only deploy secrets for clinozy-fe, sourced from setup credentials and state.
+ *
+ * clinozy-fe's own `pnpm github:sync` pushes these from its `.env.<environment>` into its GitHub
+ * Environments (they are listed in its `deploySecrets`). The files are gitignored, and Vite only
+ * exposes `VITE_*` keys to the bundle, so none of these reach the browser. Previously the Sentry token
+ * was kept out "of the committed env file" — but these files are not committed, and leaving the keys
+ * out meant every one of them had to be pasted by hand.
+ */
+/** The environment the frontend's automation jobs read from — the default one (development). */
+function frontendDefaultEnvironment(config: SetupConfig): string | undefined {
+  return (
+    config.environments.find((environment) => environment.isDefault)?.name ??
+    config.environments[0]?.name
+  );
+}
+
+/** Keys a frontend env file must not carry: the release token outside the default environment. */
+export function retiredFrontendKeys(environmentName: string, config: SetupConfig): string[] {
+  return environmentName === frontendDefaultEnvironment(config) ? [] : ['RELEASE_PLEASE_TOKEN'];
+}
+
+export function ciDeploySecrets(
+  environmentName: string,
+  config: SetupConfig,
+  secrets: SetupSecrets,
+  state: SetupState,
+): Record<string, string> {
+  const fresh: Record<string, string> = {};
+  if (config.providers.netlify?.enabled) {
+    // One Netlify site serves every environment, so the same pair goes into each file.
+    if (state.netlify?.siteId) fresh.NETLIFY_SITE_ID = state.netlify.siteId;
+    if (secrets.netlify?.authToken) fresh.NETLIFY_AUTH_TOKEN = secrets.netlify.authToken;
+  }
+  // Source-map upload during the frontend build.
+  if (config.providers.sentry.enabled && secrets.sentry?.authToken) {
+    fresh.SENTRY_AUTH_TOKEN = secrets.sentry.authToken;
+  }
+  // release-please in the frontend's CI — the same token the backend gets. The frontend reads it
+  // from its default (development) environment only — "development, never production" in its
+  // .github/environments/README.md — so no other environment's file gets it.
+  if (
+    environmentName === frontendDefaultEnvironment(config) &&
+    config.providers.github.enabled &&
+    secrets.github?.token
+  ) {
+    fresh.RELEASE_PLEASE_TOKEN = secrets.github.token;
+  }
+  return fresh;
+}
+
+/**
  * Fresh, non-empty clinozy-fe values to write into the target file, keyed by their env-file name.
  * Empty values are excluded so a stateless run never blanks an existing key.
  */
@@ -56,9 +107,12 @@ export function freshFrontendValues(
     const value = variables[canonical] ?? '';
     if (value !== '') fresh[vite] = value;
   }
+  // The deployed API the hosted SPA calls (Railway custom domain, else its generated domain). Absent
+  // until the Railway provider has recorded it, so a stateless export keeps the existing value.
+  const apiOrigin = deployedApiOrigin(state, environmentName);
+  if (apiOrigin) fresh.VITE_API_BASE_URL = apiOrigin;
   // Non-VITE, build-time Sentry identifiers for clinozy-fe's sourcemap upload — public, sourced from
-  // config (single source of truth). The SECRET half (SENTRY_AUTH_TOKEN) is a CI-only secret and is
-  // deliberately NEVER emitted into the committed env file.
+  // config (single source of truth). The token half comes with the other CI secrets below.
   if (config.providers.sentry.enabled) {
     if (config.providers.sentry.organization) {
       fresh.SENTRY_ORG = config.providers.sentry.organization;
@@ -67,7 +121,7 @@ export function freshFrontendValues(
       fresh.SENTRY_PROJECT = config.frontend.name;
     }
   }
-  return fresh;
+  return { ...fresh, ...ciDeploySecrets(environmentName, config, secrets, state) };
 }
 
 /**

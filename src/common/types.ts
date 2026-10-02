@@ -39,6 +39,8 @@ export interface EnvironmentVariables {
   LOG_LEVEL: string;
   DATABASE_URL: string;
   DATABASE_MIGRATION_URL?: string;
+  /** RLS-subject maintenance pool (`<project>_maintenance`) — set once the backend's migrations ran. */
+  DATABASE_MAINTENANCE_URL?: string;
   REDIS_URL: string;
   REDIS_BULLMQ_URL?: string;
   /** `<product>:<env tag>:` — namespaces every Redis key (derived; see deriveIdentityVariables). */
@@ -93,6 +95,10 @@ export interface EnvironmentVariables {
   POSTMAN_WORKSPACE_ID?: string;
   /** Scalar Registry slug the backend's own docs publish targets (`<base>-<env>`). */
   SCALAR_SLUG?: string;
+  /** GitHub token release-please uses so a release can trigger the deploy workflow (= GITHUB_TOKEN). */
+  RELEASE_PLEASE_TOKEN?: string;
+  /** Neon API key for the scheduled restore drill (= the setup NEON_API_KEY). */
+  MONTHLY_DATABASE_RESTORE_DRILL_NEON_API_KEY?: string;
 }
 
 export interface GuideStep {

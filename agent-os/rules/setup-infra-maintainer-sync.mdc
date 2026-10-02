@@ -1,64 +1,63 @@
 ---
 description: Strict conventions for adding/maintaining a setup:infra provider — names from setup.config.json only, registry-driven orchestrator, follow the provider template and keep dependent files in sync.
-globs: src/**/*.ts, src/setup.config.json, src/*.md, docs/deployment/setup/setup-token-instructions.md
+globs: src/**/*.ts, setup.config.json, infra.config.ts, docs/*.md
 alwaysApply: false
 ---
 
 ## Setup Infra — provider conventions (strict)
 
-### Naming: single source of truth = `src/setup.config.json`
+### Naming: single source of truth = `setup.config.json`
 
 These names are defined in **exactly one place** and every script/provider MUST read them
 from the loaded config — **never hardcode a literal**:
 
-- `project.name` — PROJECT NAME (slugs, image tags, Scalar slug, …)
+- `project.name` — PROJECT NAME (slugs, image tags, database role names, …)
 - `project.displayName` — human-readable PROJECT NAME (logs, email "from name")
 - `project.organization` — ORGANIZATION NAME (Sentry org, GitHub owner, …)
+- `product.name` / `product.domain` / `frontend.name` — shared resource names and every public host
 - `environments[].name` — ENVIRONMENT NAMES (the only valid env identifiers)
 
 Alias maps like `dev→development` may NORMALIZE user input, but the canonical values still
-come from config. Defaults that duplicate a name (e.g. a hardcoded slug) are violations —
-derive from `config.project.*` / `config.environments[]` instead. The wizard
-(`init-wizard.ts`) may hold seed defaults only because it is the file that *writes* config.
-Add a short `// NAMING (single source of truth = setup.config.json): …` comment in each
-script that references org/project/env names.
+come from config. The wizard (`src/infra/init-wizard.ts`) may hold seed defaults only because it
+*writes* config. Add a short `// NAMING (single source of truth = setup.config.json): …` comment
+in each script that references org/project/env names.
 
-### Secrets never leak (strict, enforced pre-commit)
+### Secrets never leak
 
-- **Never print a secret value.** Providers/scripts log status only (`valid`, `resolved`) — never a key/token/password/connection-string, in logs or error messages. Adding a `logger.*` that interpolates a secret is a violation.
-- **Secrets go to `.env.<environment>` only** (via `build-env-vars.ts` → provisioning / `setup:infra:export-env`). `setup:infra:output` shows a masked inventory; `--copy <KEY>` puts one value on the **clipboard** (never stdout, auto-cleared, audit-logged to `.setup/.setup-state.audit.log`). Never print a value.
-- **State is ephemeral (in-memory only)** — `common/state.ts` never writes a file; there is no `.setup-state.json`. Provisioned values live in the in-memory run state (provider → env-file writer) and durably in `.env.<environment>`; standalone commands hydrate from live remote (`hydrateStateFromRemote` / each provider's `detectRemote`). Don't reintroduce a persisted state file or an encryption layer unless asked.
-- **Agent deny-read:** `agent-os/hooks/guardrails.mjs` denies the agent Read/Bash access to `.env.<env>`, `.setup/.setup-credentials`, and any `.setup-state.*` file (e.g. the clipboard-reveal audit log; templates `*.example` stay readable). Keep the `Read` matcher in `.claude/settings.json`.
-- **Enforcement:** `.env*` (except `*.example`) + `.setup-state.*` are gitignored; pre-commit runs gitleaks `protect --staged` **and** the "No secret/state files staged" guard (blocks `git add -f`). Both run in CI too. Never weaken these.
+- **Never print a secret value.** Log status only (`valid`, `created`, `left unchanged`) — never a key/token/password/connection-string, in logs or error messages. Wrap HTTP calls in `setupFetch` (redacts thrown messages).
+- **Secrets go to the apps' `.env.<environment>` only** (via `build-env-vars.ts` → export). `setup:infra:output` shows a masked inventory; `--copy <KEY>` puts one value on the clipboard (auto-cleared, audit-logged to `.setup/.setup-state.audit.log`).
+- **Your inputs live in `.setup/.setup-credentials`** (gitignored, `0600`); per-environment app secrets as `KEY__<environment>`. The guide asks once for missing values and saves them there.
+- **State is ephemeral (in-memory only)** — `src/common/state.ts` never writes a file. Don't reintroduce a persisted state file unless asked.
+- **No pre-commit secret scan or CI exists in this repo** — never force-add `.setup/` or `.env.*`; run `pnpm health` before pushing.
 
 ### Idempotency — present? update or skip; absent? create
 
-Every resource-creating provider implements `alreadyDone()` (or `alreadyDoneEnvironments()`) so `runInteractiveStep` can: **absent → create**; **present → print "Already present" and prompt `(u)pdate / (s)kip`** (default skip; auto-skip under `--yes`/CI — never mutate existing infra unprompted). Detection uses the in-memory run state (hydrated from live remote via `detectRemote`); remote existence is also surfaced via `detectExisting()` in preview. Validate-only providers (oauth, resend, stripe, turnstile) omit it and re-validate each run. Don't reintroduce silent auto-skip or unconditional create.
+Resource-creating providers implement `alreadyDone()` (or `alreadyDoneEnvironments()`) so `runInteractiveStep` can: **absent → create**; **present → "Already present" + `(u)pdate / (s)kip`** (default skip; auto-skip under `--yes` — never mutate existing infra unprompted). Guide (stripe, google-oauth) and validate (resend) presets create nothing and re-collect/re-check each run.
 
 ### Common provider header
 
-Every `setup-<key>.provider.ts` starts with the same TSDoc block: provider **name**, one-line **description**, the **NAMING** line (names from `setup.config.json` only), and the **SECRETS** line (`.env.<environment>` only, never printed; state gitignored + agent-unreadable). See the skeleton in `SETUP_INFRA_PROVIDER_TEMPLATE.md`.
+Every `setup-<key>.provider.ts` starts with the same TSDoc block: **name**, one-line
+**description**, the **NAMING** line, and the **SECRETS** line (`.env.<environment>` only, never
+printed; setup secret files gitignored and owner-only). Skeleton: `docs/SETUP_INFRA_PROVIDER_TEMPLATE.md`.
 
 ### Orchestrator is registry-driven — do NOT edit it
 
-`infra/orchestrator.ts` iterates `INFRA_PROVIDERS` and calls each provider's interface hooks
-(`preview`, `settingsReview`, `detectExisting`, `buildStep`, `check`, `deleteInstructions`).
-There are **no** hardcoded `PREVIEW_PROVIDERS` / `displaySettingsReview` lists and **no**
-rollback/destroy. Adding a provider = implement the `InfraProvider` hooks + register in
-`providers/index.ts`. `setup:infra --delete` only prints the manual delete guide.
+`src/infra/orchestrator.ts` runs the providers composed in `infra.config.ts` (resolved by
+`src/infra/providers/index.ts` → `getInfraProviders()`) through their hooks (`preview`,
+`settingsReview`, `detectExisting`, `buildStep`, `check`, `deleteInstructions`). No rollback or
+destroy: `setup:infra --delete` only prints the manual delete guide.
 
 ### Adding / maintaining a provider
 
-1. **Follow** [`src/SETUP_INFRA_PROVIDER_TEMPLATE.md`](../../src/SETUP_INFRA_PROVIDER_TEMPLATE.md) (10-step checklist + skeleton).
+1. **Follow** [`docs/SETUP_INFRA_PROVIDER_TEMPLATE.md`](../../docs/SETUP_INFRA_PROVIDER_TEMPLATE.md) (checklist + skeleton); prefer a preset (`preset-author` skill).
 2. **Read** `agent-os/skills/setup-infra-maintainer/SKILL.md` for the full dependent-file list.
-3. Touch every layer that applies: config schema + init default (`config.ts`,
-   `init-wizard.ts`, `setup.config.json`) · secrets + `.setup/.setup-credentials` template (`secrets.ts`) ·
-   state (`state.ts`, only if it resolves/creates a value) · runtime env emission
-   (`toEnvironmentVariables()` on the provider — never edit `build-env-vars.ts`, it composes
-   the registry) · provider module + registry (`providers/setup-<key>/…`,
-   `providers/index.ts`) · guide (`guide.ts`) · prerequisites (`prerequisites.ts`, only if a
-   CLI/token is required) · docs (`setup-token-instructions.md` both tables,
-   `src/SETUP_INFRA_README.md` provider list).
-4. **Verify**: `pnpm typecheck` · `pnpm setup:infra:preview` (provider appears) ·
-   `pnpm setup:infra --providers <key>` · `npx biome check tooling/setup`.
-5. If you changed deployment docs, run **docs-maintainer** for the index/cross-links.
+3. Touch every layer that applies: config schema + init default (`src/common/config.ts`,
+   `src/infra/init-wizard.ts`, `setup.config.json`) · credentials (`src/common/secrets.ts`) ·
+   state (`src/common/state.ts`, only if it resolves/creates a value) · env emission
+   (`toEnvironmentVariables()` on the provider — never edit `build-env-vars.ts`) · provider +
+   preset + composition (`src/infra/providers/setup-<key>/…`, `src/presets/`, `infra.config.ts`) ·
+   guide prompts (`src/infra/guide.ts`) · prerequisites (`src/infra/prerequisites.ts`, only for a CLI) ·
+   checklist (`src/infra/next-steps.ts`, only for manual follow-ups) · docs
+   (`docs/SETUP_INFRA_PREREQUISITES.md` tables, `docs/SETUP_INFRA_README.md` provider list).
+4. **Verify**: `pnpm health` · `pnpm setup:infra:preview` (provider appears) ·
+   `pnpm setup:infra --providers <key>`.

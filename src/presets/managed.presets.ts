@@ -8,12 +8,14 @@
  * inspectRemote/check/deleteInstructions/detectRemote). Splitting API calls from
  * wiring per-provider can follow later, ideally with integration testing.
  */
+import { NETLIFY_LOGIN_COMMAND } from '@setup/common/secrets.js';
 import { setupAwsProvider } from '@setup/infra/providers/setup-aws/setup-aws.provider.js';
 import { setupCloudflareTurnstileProvider } from '@setup/infra/providers/setup-cloudflare-turnstile/setup-cloudflare-turnstile.provider.js';
 import { setupGithubProvider } from '@setup/infra/providers/setup-github/setup-github.provider.js';
 import { setupGithubAppWithOauthProvider } from '@setup/infra/providers/setup-github-app-with-oauth/setup-github-app-with-oauth.provider.js';
 import { setupJwtProvider } from '@setup/infra/providers/setup-jwt/setup-jwt.provider.js';
 import { setupNeonProvider } from '@setup/infra/providers/setup-neon/setup-neon.provider.js';
+import { setupNetlifyProvider } from '@setup/infra/providers/setup-netlify/setup-netlify.provider.js';
 import { setupPostmanProvider } from '@setup/infra/providers/setup-postman/setup-postman.provider.js';
 import { setupPosthogProvider } from '@setup/infra/providers/setup-posthog/setup-posthog.provider.js';
 import { setupRailwayProvider } from '@setup/infra/providers/setup-railway/setup-railway.provider.js';
@@ -30,8 +32,16 @@ export const neonPreset: ManagedPreset = {
   credentials: ['NEON_API_KEY'],
   dashboard: { url: 'https://console.neon.tech/app/settings/api-keys', label: 'Neon → API keys' },
   outputs: [
-    { key: 'DATABASE_URL', description: 'Pooled Postgres connection string' },
-    { key: 'DATABASE_MIGRATION_URL', description: 'Direct (unpooled) connection for migrations' },
+    { key: 'DATABASE_URL', description: 'Pooled connection as the backend app role (runtime)' },
+    {
+      key: 'DATABASE_MIGRATION_URL',
+      description: 'Direct connection as the backend migrator — the deploy runs migrations with it',
+    },
+    { key: 'DATABASE_MAINTENANCE_URL', description: 'Pooled connection as the maintenance role' },
+    {
+      key: 'MONTHLY_DATABASE_RESTORE_DRILL_NEON_API_KEY',
+      description: 'Neon API key for the scheduled restore drill (= NEON_API_KEY)',
+    },
   ],
 };
 
@@ -163,8 +173,15 @@ export const githubPreset: ManagedPreset = {
     url: 'https://github.com/settings/tokens',
     label: 'GitHub → personal access tokens',
   },
-  // Env-scoped secrets/variables are synced by the GitHub sync step, not written here.
-  outputs: [],
+  // Env-scoped secrets/variables are synced by the GitHub sync step. The one value written here is
+  // the release token: GitHub has no API to mint a personal token, so GITHUB_TOKEN is the source.
+  outputs: [
+    {
+      key: 'RELEASE_PLEASE_TOKEN',
+      description:
+        'GitHub token release-please uses so a release triggers the deploy (= GITHUB_TOKEN)',
+    },
+  ],
 };
 
 export const postmanPreset: ManagedPreset = {
@@ -184,6 +201,23 @@ export const scalarPreset: ManagedPreset = {
   provider: setupScalarProvider,
   credentials: ['SCALAR_API_KEY'],
   dashboard: { url: 'https://dashboard.scalar.com', label: 'Scalar → dashboard' },
-  // Publishes an OpenAPI doc per env; the registry URL is metadata, not a runtime env var.
+  // Publishes an OpenAPI doc per env; the backend's own docs workflow publishes to the same slug.
+  outputs: [{ key: 'SCALAR_SLUG', description: 'Scalar Registry slug, `<project>-<env>`' }],
+};
+
+export const netlifyPreset: ManagedPreset = {
+  kind: 'managed',
+  key: 'netlify',
+  name: 'Netlify',
+  provider: setupNetlifyProvider,
+  // No credential: the token comes only from the Netlify CLI login on this machine.
+  credentials: [],
+  dashboard: { url: 'https://docs.netlify.com/cli/get-started/', label: 'Netlify CLI' },
+  steps: [
+    `Log in once on this machine: ${NETLIFY_LOGIN_COMMAND} (opens the browser; no global install needed).`,
+    'Run pnpm setup:infra — it finds or creates the frontend site and writes NETLIFY_SITE_ID + NETLIFY_AUTH_TOKEN into the frontend env.',
+  ],
+  // Frontend-only: NETLIFY_SITE_ID + NETLIFY_AUTH_TOKEN are written to the frontend env by
+  // frontend-env-keys.ts, never to the backend env (which is what `outputs` describes).
   outputs: [],
 };

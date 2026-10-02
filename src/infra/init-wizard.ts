@@ -18,7 +18,7 @@ import { resolveResendFromAddress } from '@setup/common/resend-from.js';
 import { SetupError } from '@setup/common/setup-error.js';
 import { assertInteractive } from '@setup/common/interactive-step.js';
 import * as logger from '@setup/common/logger.js';
-import { buildDefaultArtifacts } from '@setup/codegen/project-identity.util.js';
+import { buildDefaultArtifacts } from '@setup/identity/project-identity.util.js';
 import { runGuide } from '@setup/infra/setup-guide/index.js';
 import { renderInfraConfigTs } from '@setup/infra/scaffold-config.js';
 import { PRESETS } from '@setup/presets/index.js';
@@ -196,6 +196,7 @@ export function buildConfig(
       },
       postman: { enabled: true },
       scalar: { enabled: true },
+      netlify: { enabled: true },
     },
     app: {
       port: 3000,

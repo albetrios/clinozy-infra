@@ -159,6 +159,32 @@ interface EnsureResult {
   readonly drift: number;
 }
 
+/** The GitHub calls {@link ensureGithubEnvironment} makes — injectable for tests. */
+export interface GithubEnvironmentApi {
+  exists(repository: string, environment: string): boolean;
+  create(repository: string, environment: string): void;
+}
+
+const githubEnvironmentApi: GithubEnvironmentApi = {
+  exists: environmentExists,
+  create: createOrUpdateEnvironment,
+};
+
+/**
+ * Make sure one GitHub Environment exists: an existing one is left untouched (protection rules are
+ * the app's own `.github/environments/*.json`, checked by `validate:github-environments`); a missing
+ * one is created empty for the app's `github:sync` to fill.
+ */
+export function ensureGithubEnvironment(
+  repository: string,
+  environment: string,
+  api: GithubEnvironmentApi = githubEnvironmentApi,
+): 'present' | 'created' {
+  if (api.exists(repository, environment)) return 'present';
+  api.create(repository, environment);
+  return 'created';
+}
+
 function ensureBranches(args: {
   readonly repository: string;
   readonly branches: readonly string[];
@@ -236,7 +262,7 @@ function ensureEnvironments(args: {
 
   for (const environment of environments) {
     try {
-      const exists = environmentExists(repository, environment);
+      const exists = githubEnvironmentApi.exists(repository, environment);
 
       if (exists) {
         console.log(`  ${environment}: already present`);
@@ -254,7 +280,7 @@ function ensureEnvironments(args: {
         continue;
       }
 
-      createOrUpdateEnvironment(repository, environment);
+      ensureGithubEnvironment(repository, environment);
       console.log(`  ${environment}: created`);
     } catch (ensureError) {
       failures += 1;

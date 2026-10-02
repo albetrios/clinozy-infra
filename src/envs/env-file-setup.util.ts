@@ -40,8 +40,63 @@ export function oauthAppDisplayName(projectName: string, environmentName: string
 export function backendOriginForEnvironment(config: SetupConfig, environmentName: string): string {
   const configured = config.app.frontendUrl[environmentName];
   if (configured && configured.trim().length > 0) return configured.trim();
+  const host = apiHostForEnvironment(config, environmentName);
+  if (host) return `https://${host}`;
   if (environmentName === 'development') return 'http://localhost:3000';
   return '';
+}
+
+/** True when the environment deploys production (`nodeEnvironment: production`). */
+function isProductionEnvironment(config: SetupConfig, environmentName: string): boolean {
+  return (
+    config.environments.find((environment) => environment.name === environmentName)
+      ?.nodeEnvironment === 'production'
+  );
+}
+
+/**
+ * The API's public hostname under `product.domain`: `api.<domain>` in production,
+ * `<env>--api.<domain>` elsewhere — one label, so a `*.<domain>` certificate and Cloudflare's proxy
+ * cover every environment. `undefined` when no domain is configured.
+ */
+export function apiHostForEnvironment(
+  config: SetupConfig,
+  environmentName: string,
+): string | undefined {
+  const domain = config.product?.domain;
+  if (!domain) return undefined;
+  return isProductionEnvironment(config, environmentName)
+    ? `api.${domain}`
+    : `${environmentName}--api.${domain}`;
+}
+
+/**
+ * The frontend's public hostname: `app.<domain>` in production; other environments stay on their
+ * Netlify alias (`<env>--<site>.netlify.app`) — Netlify cannot put an alias deploy on a custom domain
+ * without Netlify DNS. `undefined` when neither source is configured.
+ */
+export function appHostForEnvironment(
+  config: SetupConfig,
+  environmentName: string,
+): string | undefined {
+  if (isProductionEnvironment(config, environmentName)) {
+    return config.product?.domain ? `app.${config.product.domain}` : undefined;
+  }
+  const site = config.frontend?.name;
+  return site && config.providers.netlify?.enabled
+    ? `${environmentName}--${site}.netlify.app`
+    : undefined;
+}
+
+/**
+ * CORS allowlist for an env: `app.allowedOrigins.<env>` when set, else the env's own frontend origin.
+ * No fallback to another environment — production must never inherit development's origins.
+ */
+export function allowedOriginsForEnvironment(config: SetupConfig, environmentName: string): string {
+  return (
+    config.app.allowedOrigins[environmentName]?.trim() ||
+    frontendOriginForEnvironment(config, environmentName)
+  );
 }
 
 /**
@@ -56,8 +111,19 @@ export function resolveEnvironmentApiBaseUrl(
   state: SetupState,
   environmentName: string,
 ): string {
-  const configured = backendOriginForEnvironment(config, environmentName);
-  if (configured) return configured;
+  return (
+    backendOriginForEnvironment(config, environmentName) ||
+    deployedApiOrigin(state, environmentName)
+  );
+}
+
+/**
+ * The deployed API's public origin for an env, from Railway state: a custom domain (from
+ * `pnpm setup:domain`) wins over the Railway-generated service domain. '' when nothing is deployed
+ * or recorded. This — not `app.frontendUrl`, which holds the local dev origin — is what the
+ * hosted frontend must call (VITE_API_BASE_URL).
+ */
+export function deployedApiOrigin(state: SetupState, environmentName: string): string {
   const services = [
     ...Object.values(state.railway?.environments?.[environmentName]?.services ?? {}),
     ...Object.values(state.railway?.services ?? {}),
@@ -123,6 +189,8 @@ export function productResourceName(config: SetupConfig, environmentName: string
 export function frontendOriginForEnvironment(config: SetupConfig, environmentName: string): string {
   const configured = config.frontend?.url?.[environmentName];
   if (configured && configured.trim().length > 0) return configured.trim();
+  const host = appHostForEnvironment(config, environmentName);
+  if (host) return `https://${host}`;
   if (environmentName === 'development') return 'http://localhost:5173';
   return '';
 }
@@ -201,21 +269,22 @@ export function isNonInteractiveRun(): boolean {
 }
 
 /**
- * Resolve a guide field's value non-interactively from the environment. Supports a
- * per-environment override (`KEY__<env>`, e.g. `STRIPE_SECRET_KEY__production`) and a shared
- * fallback (`KEY`). Pure — `env` is injectable for tests. Returns `undefined` when neither is set,
- * so an absent value leaves whatever is already on disk untouched (idempotent).
+ * Resolve a guide field's value from `.setup/.setup-credentials` (loaded into the environment):
+ * `KEY__<env>` (e.g. `STRIPE_SECRET_KEY__production`), plus — only when `shared` (account-scoped
+ * fields, one value for every environment) — a plain `KEY`. Per-environment fields never fall back to
+ * `KEY`: one exported in a shell would silently land in every environment, production included. Pure
+ * — `env` is injectable for tests. `undefined` when unset, so what is on disk stays (idempotent).
  */
 export function resolveNonInteractiveFieldValue(
   key: string,
   environmentName: string,
   env: Record<string, string | undefined> = process.env,
+  { shared = true }: { shared?: boolean } = {},
 ): string | undefined {
   const perEnv = env[`${key}__${environmentName}`]?.trim();
   if (perEnv) return perEnv;
-  const shared = env[key]?.trim();
-  if (shared) return shared;
-  return undefined;
+  const fallback = shared ? env[key]?.trim() : undefined;
+  return fallback || undefined;
 }
 
 /**
@@ -267,8 +336,8 @@ async function promptField(field: EnvCredentialField, defaultValue: string): Pro
  * `.env.<environment>` for every enabled environment in `config.environments`.
  *
  * @remarks
- * **Inputs come from stdin only** — never read from the env file as a source. Secrets are
- * masked. An empty answer keeps whatever is already on disk (idempotent re-runs). For
+ * **Inputs come from `.setup/.setup-credentials`** (`KEY__<env>` or `KEY`) when set, else from stdin
+ * — never read from the env file as a source. Secrets are masked. An empty answer keeps whatever is already on disk (idempotent re-runs). For
  * `account` scope the prompt runs once and the value is written to every environment; for
  * `per-environment` scope each environment is prompted separately (e.g. separate OAuth apps).
  * **Side effects:** writes/creates `.env.<environment>` via `upsertEnvFileValue`. The guide for
@@ -287,7 +356,7 @@ export async function collectEnvCredentials(
   logger.blank();
   if (nonInteractive) {
     logger.info(
-      `Reading ${providerName} credentials from the environment (non-interactive): set KEY or KEY__<env>.`,
+      `Reading ${providerName} values from .setup/.setup-credentials (KEY__<env> or KEY); an empty one keeps the current value.`,
     );
   } else if (!skipEnvironmentGate && environments.length > 1) {
     logger.info(
@@ -297,13 +366,22 @@ export async function collectEnvCredentials(
     logger.info(`Enter ${providerName} credentials (press Enter to keep the current value):`);
   }
 
-  // Non-interactive: pull from the environment (never prompt). Interactive: prompt via stdin.
+  // `.setup/.setup-credentials` (loaded into the environment) is the source when it holds the value;
+  // otherwise prompt via stdin — or, in a non-interactive run, keep what is on disk.
   const collectFieldValue = async (
     field: EnvCredentialField,
     environmentName: string,
   ): Promise<string> => {
-    if (nonInteractive) {
-      return resolveNonInteractiveFieldValue(field.key, environmentName) ?? '';
+    const fromCredentials = resolveNonInteractiveFieldValue(
+      field.key,
+      environmentName,
+      process.env,
+      {
+        shared: scope === 'account',
+      },
+    );
+    if (fromCredentials || nonInteractive) {
+      return fromCredentials ?? '';
     }
     const defaultValue = field.defaultValue?.(config, environmentName) ?? '';
     return promptField(field, defaultValue);

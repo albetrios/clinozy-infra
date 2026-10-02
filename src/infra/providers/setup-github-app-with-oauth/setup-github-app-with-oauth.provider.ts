@@ -10,7 +10,7 @@
  * NAMING (single source of truth = setup.config.json): organization/project names from
  * `config.project.*`, environment names from `config.environments[].name` — never hardcoded.
  * SECRETS: written to `.env.<environment>` only, never printed to the console; setup secret files
- * are gitignored and unreadable by the agent (deny-read guard). See SETUP_INFRA_PROVIDER_TEMPLATE.md.
+ * are gitignored and written owner-only. See SETUP_INFRA_PROVIDER_TEMPLATE.md.
  */
 import * as logger from '@setup/common/logger.js';
 import type {
@@ -175,10 +175,6 @@ async function validateGithubOauth(context: InfraProviderContext): Promise<Provi
       };
 }
 
-export function githubAppWithOauthGuideConfigured(config: SetupConfig): boolean {
-  return hasCompleteGithubOauthConfig(config);
-}
-
 function githubOauthPasteOnly(): boolean {
   const value = process.env.SETUP_INFRA_GITHUB_OAUTH_PASTE_ONLY?.trim().toLowerCase();
   return value === '1' || value === 'true' || value === 'yes';
@@ -255,6 +251,14 @@ async function provisionGithubApp(context: InfraProviderContext): Promise<boolea
 
 export const setupGithubAppWithOauthProvider: InfraProvider = {
   key: 'github-app-with-oauth',
+  // The redirect URI is a pure function of the SPA origin, so it is derived on every run instead of
+  // keeping a pasted value that goes stale on a rename (client id/secret stay user-entered).
+  toEnvironmentVariables: ({ config }, environmentName) => {
+    const redirectUri = config.providers.oauth.github.enabled
+      ? githubCallbackUrl(config, environmentName)
+      : '';
+    return redirectUri ? { OAUTH_GITHUB_REDIRECT_URI: redirectUri } : {};
+  },
   name: 'GitHub App (sign-in)',
   isEnabled: ({ config }) => config.providers.oauth.github.enabled,
   disabledReason: () => 'GitHub OAuth disabled in setup.config.json',

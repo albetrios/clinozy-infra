@@ -42,7 +42,9 @@ describe('runDoctorChecks', () => {
 
   it('flags production environments with an empty public frontend URL', () => {
     const diagnostics = runDoctorChecks(config({}), PRESETS);
-    expect(diagnostics.some((d) => /frontend.url.production is empty/.test(d.message))).toBe(true);
+    expect(
+      diagnostics.some((d) => /no frontend URL for production environment/.test(d.message)),
+    ).toBe(true);
   });
 
   it('warns when two presets declare the same output key', () => {
