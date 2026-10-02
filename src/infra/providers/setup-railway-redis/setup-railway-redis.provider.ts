@@ -25,15 +25,13 @@ const RAILWAY_API_URL = 'https://backboard.railway.com/graphql/v2';
 const REDIS_TEMPLATE_CODE = 'redis';
 const REDIS_PORT = 6379;
 /**
- * The Railway `redis` database template creates a service named "Redis" by
- * default. Railway's private DNS lowercases service names, so per-environment
- * resolution still goes through `redis.railway.internal`. api/worker in
- * `production` reach the `production` redis, `development` reaches the
- * `development` redis — same hostname string, scoped resolution. This URL is
- * only routable inside Railway's WireGuard mesh — local `pnpm dev` cannot
- * reach it (see docs/deployment/runbooks/redis-topology.md).
+ * The Railway `redis` template names its service "Redis", but a second deploy into the same
+ * project gets a suffixed name (production's became "Redis-ufVc"), and Railway's private DNS
+ * follows the service name (`redis-ufvc.railway.internal`). So the host is read from the
+ * service itself — its rendered REDISHOST / RAILWAY_PRIVATE_DOMAIN — never assumed. The URL is
+ * only routable inside Railway's private network; local `pnpm dev` cannot reach it.
  */
-const REDIS_PRIVATE_HOSTNAME = 'redis.railway.internal';
+const RAILWAY_PRIVATE_DNS_SUFFIX = '.railway.internal';
 /** Default service name created by the `redis` template. */
 const REDIS_SERVICE_NAME_DEFAULT = 'Redis';
 /** Key under which the service is recorded in `state.railway.environments.<env>.services`. */
@@ -77,19 +75,35 @@ async function railwayGraphQL<T>(
   return result.data as T;
 }
 
-function buildRailwayRedisUrl(redisPassword: string): string {
-  return `redis://default:${encodeURIComponent(redisPassword)}@${REDIS_PRIVATE_HOSTNAME}:${REDIS_PORT}`;
+/** Password + private host of one environment's Redis service, as Railway renders them. */
+export interface RedisConnection {
+  readonly password: string;
+  readonly host: string;
 }
 
-function buildRailwayPrivateEndpoint(): string {
-  return `${REDIS_PRIVATE_HOSTNAME}:${REDIS_PORT}`;
+export function buildRailwayRedisUrl(connection: RedisConnection): string {
+  return `redis://default:${encodeURIComponent(connection.password)}@${connection.host}:${REDIS_PORT}`;
+}
+
+function buildRailwayPrivateEndpoint(connection: RedisConnection): string {
+  return `${connection.host}:${REDIS_PORT}`;
+}
+
+/**
+ * The service's private host from its rendered variables: REDISHOST (the template's own), else
+ * RAILWAY_PRIVATE_DOMAIN, else the private-DNS name Railway derives from the service name.
+ */
+export function redisPrivateHost(variables: Record<string, string>, serviceName: string): string {
+  const rendered = variables.REDISHOST || variables.RAILWAY_PRIVATE_DOMAIN;
+  if (rendered && !rendered.includes('${{')) return rendered;
+  return `${serviceName.toLowerCase()}${RAILWAY_PRIVATE_DNS_SUFFIX}`;
 }
 
 function hasUsableRedisState(state: SetupState, environmentName: string): boolean {
   const database = state.redis?.databases?.[environmentName];
   if (!(database?.redisUrl && database.databaseId)) return false;
   if (database.redisUrl.includes('${{')) return false;
-  return database.redisUrl.includes(`@${REDIS_PRIVATE_HOSTNAME}:`);
+  return database.redisUrl.includes(`${RAILWAY_PRIVATE_DNS_SUFFIX}:`);
 }
 
 async function resolveWorkspaceId(token: string, projectId: string): Promise<string | undefined> {
@@ -324,12 +338,13 @@ async function fetchServiceVariables(options: {
   return result.variables ?? {};
 }
 
-async function readRedisPassword(options: {
+async function readRedisConnection(options: {
   token: string;
   projectId: string;
   environmentId: string;
   serviceId: string;
-}): Promise<string> {
+  serviceName: string;
+}): Promise<RedisConnection> {
   const variables = await fetchServiceVariables(options);
   const password = variables.REDIS_PASSWORD;
   if (!password) {
@@ -337,13 +352,13 @@ async function readRedisPassword(options: {
       `Railway Redis: REDIS_PASSWORD is missing on the template-created service ${options.serviceId}.`,
     );
   }
-  return password;
+  return { password, host: redisPrivateHost(variables, options.serviceName) };
 }
 
 interface AdoptableRedisService {
   serviceId: string;
   serviceName: string;
-  redisPassword: string;
+  connection: RedisConnection;
 }
 
 /**
@@ -381,7 +396,7 @@ async function findAdoptableRedisService(options: {
         return {
           serviceId: candidate.serviceId,
           serviceName: candidate.serviceName,
-          redisPassword: password,
+          connection: { password, host: redisPrivateHost(variables, candidate.serviceName) },
         };
       }
     } catch {
@@ -466,7 +481,7 @@ export async function provision(
       NonNullable<SetupState['railway']>['environments']
     >[string]['services'],
     serviceId: string,
-    redisPassword: string,
+    connection: RedisConnection,
   ): void => {
     railwayEnvironments[environmentName] = {
       environmentId,
@@ -477,8 +492,8 @@ export async function provision(
     };
     databases[environmentName] = {
       databaseId: `${serviceId}:${environmentId}`,
-      publicEndpoint: buildRailwayPrivateEndpoint(),
-      redisUrl: buildRailwayRedisUrl(redisPassword),
+      publicEndpoint: buildRailwayPrivateEndpoint(connection),
+      redisUrl: buildRailwayRedisUrl(connection),
     };
     applyStateUpdates?.({
       redis: { subscriptionId: 0, databases },
@@ -535,7 +550,7 @@ export async function provision(
         environmentState.environmentId,
         environmentState.services,
         existingRedis.serviceId,
-        existingRedis.redisPassword,
+        existingRedis.connection,
       );
       adopted.push(environmentName);
       logger.success(
@@ -581,11 +596,12 @@ export async function provision(
         config: config.providers.railwayRedis,
       });
 
-      const redisPassword = await readRedisPassword({
+      const connection = await readRedisConnection({
         token,
         projectId,
         environmentId: environmentState.environmentId,
         serviceId: discovered.serviceId,
+        serviceName: discovered.serviceName,
       });
 
       recordEnvironmentState(
@@ -593,7 +609,7 @@ export async function provision(
         environmentState.environmentId,
         environmentState.services,
         discovered.serviceId,
-        redisPassword,
+        connection,
       );
 
       provisioned.push(environmentName);
@@ -858,8 +874,8 @@ export const setupRailwayRedisProvider: InfraProvider = {
         };
         databases[environmentName] = {
           databaseId: `${existingRedis.serviceId}:${environmentState.environmentId}`,
-          publicEndpoint: buildRailwayPrivateEndpoint(),
-          redisUrl: buildRailwayRedisUrl(existingRedis.redisPassword),
+          publicEndpoint: buildRailwayPrivateEndpoint(existingRedis.connection),
+          redisUrl: buildRailwayRedisUrl(existingRedis.connection),
         };
 
         applyStateUpdates({
