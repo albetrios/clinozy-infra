@@ -18,9 +18,13 @@ export const deriveResendFromAddress = (projectName: string): string =>
 /** Derived sender name from a project display name. */
 export const deriveResendFromName = (displayName: string): string => displayName;
 
-/** Explicit override in config, else the derived address. */
+/** Explicit override in config, else `noreply@<product.domain>`, else the project-name fallback. */
 export function resolveResendFromAddress(config: SetupConfig): string {
-  return config.providers.resend.fromAddress.trim() || deriveResendFromAddress(config.project.name);
+  const domain = config.product?.domain;
+  return (
+    config.providers.resend.fromAddress.trim() ||
+    (domain ? `noreply@${domain}` : deriveResendFromAddress(config.project.name))
+  );
 }
 
 /** Explicit override in config, else the derived name. */

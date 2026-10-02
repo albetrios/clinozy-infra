@@ -17,7 +17,10 @@ const withProductionUrl = (production: string): SetupConfig => ({
 });
 
 /** Fake Netlify API: GET answers from `sites` by domain, POST records the created site. */
-function fakeNetlify(sites: Record<string, { id: string; name: string }>, createStatus = 201) {
+function fakeNetlify(
+  sites: Record<string, { id: string; name: string; custom_domain?: string }>,
+  createStatus = 201,
+) {
   const calls: Array<{ method: string; url: string; body?: unknown }> = [];
   const fetchImplementation = async (url: string, init?: RequestInit): Promise<Response> => {
     const method = init?.method ?? 'GET';
@@ -26,6 +29,14 @@ function fakeNetlify(sites: Record<string, { id: string; name: string }>, create
     if (method === 'POST') {
       const created = { id: 'new-site-id', name: (body as { name: string }).name };
       return new Response(JSON.stringify(created), { status: createStatus });
+    }
+    if (method === 'PATCH') {
+      return new Response(
+        JSON.stringify({ id: 'existing-id', name: 'acme-fe', ...(body as object) }),
+        {
+          status: 200,
+        },
+      );
     }
     const domain = decodeURIComponent(url.split('/sites/')[1] ?? '');
     const site = sites[domain];
@@ -71,13 +82,28 @@ describe('ensureNetlifySite', () => {
   });
 
   it('finds a custom-domain site by that domain first', async () => {
-    const api = fakeNetlify({ 'app.acme.test': { id: 'custom-id', name: 'acme-fe' } });
+    const api = fakeNetlify({
+      'app.acme.test': { id: 'custom-id', name: 'acme-fe', custom_domain: 'app.acme.test' },
+    });
     const result = await ensureNetlifySite(
       'fake-token',
       { siteName: 'acme-fe', customDomain: 'app.acme.test' },
       api.fetchImplementation,
     );
     expect(result.site.id).toBe('custom-id');
+  });
+
+  it('attaches a missing custom domain to an adopted site', async () => {
+    const api = fakeNetlify({ 'acme-fe.netlify.app': { id: 'existing-id', name: 'acme-fe' } });
+    await ensureNetlifySite(
+      'fake-token',
+      { siteName: 'acme-fe', customDomain: 'app.acme.test' },
+      api.fetchImplementation,
+    );
+    expect(api.calls.at(-1)).toMatchObject({
+      method: 'PATCH',
+      body: { custom_domain: 'app.acme.test' },
+    });
   });
 
   it('creates the site (with its custom domain) when none exists', async () => {

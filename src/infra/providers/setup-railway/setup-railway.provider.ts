@@ -13,7 +13,8 @@ import * as logger from '@setup/common/logger.js';
 import { isSecretFilled } from '@setup/common/secrets.js';
 import { setupFetch } from '@setup/common/setup-fetch.js';
 import { resourceStatus } from '@setup/common/interactive-step.js';
-import { ensureServiceDomain } from '@setup/railway/railway-api.js';
+import { apiHostForEnvironment } from '@setup/envs/env-file-setup.util.js';
+import { ensureCustomDomain, ensureServiceDomain } from '@setup/railway/railway-api.js';
 import type {
   SetupConfig,
   SetupState,
@@ -542,6 +543,41 @@ export async function provision(
         logger.success(
           `  API domain for "${environmentName}" ${created ? 'created' : 'found'}: https://${domain.domain}`,
         );
+
+        // The product's own hostname (`api.<domain>` / `<env>--api.<domain>`), attached on top. It
+        // wins downstream once recorded; Railway issues the certificate when DNS points at it.
+        const customHost = apiHostForEnvironment(config, environmentName);
+        if (customHost) {
+          const { customDomain, created: attached } = await ensureCustomDomain(apiToken, {
+            projectId: railwayProjectId,
+            environmentId: environmentState.environmentId,
+            serviceId: apiService.serviceId,
+            domain: customHost,
+            targetPort: config.app.port,
+          });
+          const current = environmentState.services[RAILWAY_PUBLIC_SERVICE];
+          if (current) {
+            environmentState.services[RAILWAY_PUBLIC_SERVICE] = {
+              ...current,
+              customDomain: {
+                domain: customDomain.domain,
+                customDomainId: customDomain.id,
+                targetPort: config.app.port,
+                verified: customDomain.status.verified,
+                certificateStatus: customDomain.status.certificateStatus,
+                attachedAt: new Date().toISOString(),
+              },
+            };
+          }
+          logger.success(
+            `  Custom API domain for "${environmentName}" ${attached ? 'attached' : 'already attached'}: https://${customHost}${customDomain.status.verified ? '' : ' (waiting for DNS)'}`,
+          );
+          if (!customDomain.status.verified) {
+            for (const record of customDomain.status.dnsRecords) {
+              logger.info(`    DNS: ${record.recordType} ${record.fqdn} → ${record.requiredValue}`);
+            }
+          }
+        }
       } catch (domainError) {
         const message = domainError instanceof Error ? domainError.message : String(domainError);
         logger.warn(`  Could not ensure an API domain for "${environmentName}": ${message}`);

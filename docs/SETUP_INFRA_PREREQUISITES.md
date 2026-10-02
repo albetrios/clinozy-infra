@@ -61,6 +61,18 @@ These are prompted at apply (stdin) and written into the matching `.env.<environ
 
 ## Shared vs per-codebase naming
 
+`product.domain` (e.g. `clinozy.com`) is the single source of every public address:
+
+| Environment | Frontend | API | CORS |
+| --- | --- | --- | --- |
+| production | `https://app.<domain>` (attached to the Netlify site) | `https://api.<domain>` (Railway custom domain) | the frontend |
+| any other | `https://<env>--<frontend.name>.netlify.app` (Netlify alias) | `https://<env>--api.<domain>` (Railway custom domain) | the frontend |
+
+Email is sent from `noreply@<domain>`; setup registers the domain with Resend. Turnstile widgets
+allow both hosts. Each Railway, Netlify and Resend step prints the DNS records still to create. An
+explicit `frontend.url.<env>` / `app.frontendUrl.<env>` / `app.allowedOrigins.<env>` /
+`providers.resend.fromAddress` still wins over the derived value.
+
 `setup.config.json` distinguishes three names: `project.name` (backend, e.g. `clinozy-be`), `frontend.name`
 (frontend, e.g. `clinozy-fe`), and `product.name` (e.g. `clinozy`). Resources **shared** by both apps —
 PostHog and Turnstile — are named `<product>-<env>` (`clinozy-development`, `clinozy-production`). Sentry is

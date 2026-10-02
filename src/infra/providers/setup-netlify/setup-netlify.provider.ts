@@ -45,6 +45,7 @@ interface NetlifySite {
   name: string;
   ssl_url?: string;
   url?: string;
+  custom_domain?: string | null;
 }
 
 type NetlifyState = NonNullable<SetupState['netlify']>;
@@ -113,7 +114,25 @@ export async function ensureNetlifySite(
   fetchImplementation?: FetchImplementation,
 ): Promise<{ site: NetlifySite; created: boolean }> {
   const existing = await findNetlifySite(token, target, fetchImplementation);
-  if (existing) return { site: existing, created: false };
+  if (existing) {
+    // An adopted site may predate the custom domain (e.g. product.domain added later) — attach it.
+    // Netlify accepts it before DNS exists and serves it once the CNAME points at the site.
+    if (target.customDomain && existing.custom_domain !== target.customDomain) {
+      const response = await setupFetch({
+        name: 'Netlify',
+        url: `${NETLIFY_API}/sites/${encodeURIComponent(existing.id)}`,
+        init: {
+          method: 'PATCH',
+          headers: { ...authHeaders(token), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ custom_domain: target.customDomain }),
+        },
+        expectedStatus: 200,
+        ...withFetch(fetchImplementation),
+      });
+      return { site: (await response.json()) as NetlifySite, created: false };
+    }
+    return { site: existing, created: false };
+  }
 
   const response = await setupFetch({
     name: 'Netlify',
@@ -158,6 +177,11 @@ export async function provision(
   logger.success(
     `  Netlify site "${site.name}" — ${created ? 'created' : 'adopted'} (serves every environment)`,
   );
+  if (target.customDomain) {
+    logger.info(
+      `    Custom domain ${target.customDomain} — DNS: CNAME ${target.customDomain} → ${site.name}.netlify.app`,
+    );
+  }
   return {
     success: true,
     message: `Netlify: site ${site.name} ${created ? 'created' : 'adopted'}`,

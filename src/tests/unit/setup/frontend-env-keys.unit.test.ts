@@ -8,6 +8,7 @@ import {
   FRONTEND_FALLBACK_HEADER,
   buildFrontendEnvContent,
   ciDeploySecrets,
+  retiredFrontendKeys,
   freshFrontendValues,
   frontendEnvFileName,
 } from '@setup/envs/frontend-env-keys.js';
@@ -226,5 +227,12 @@ describe('CI deploy secrets for the frontend', () => {
         stateWithPosthog,
       ),
     ).toEqual({ NETLIFY_AUTH_TOKEN: 'fake-netlify-token' });
+  });
+});
+
+describe('retiredFrontendKeys', () => {
+  it('removes the release token everywhere but the default environment', () => {
+    expect(retiredFrontendKeys('development', baseConfig)).toEqual([]);
+    expect(retiredFrontendKeys('production', baseConfig)).toEqual(['RELEASE_PLEASE_TOKEN']);
   });
 });

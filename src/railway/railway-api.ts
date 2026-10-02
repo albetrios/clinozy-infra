@@ -123,3 +123,150 @@ export async function ensureServiceDomain(
     created: true,
   };
 }
+
+export interface DnsRecord {
+  recordType: string;
+  hostlabel: string;
+  fqdn: string;
+  requiredValue: string;
+  currentValue: string;
+  status: string;
+  purpose: string;
+  zone: string;
+}
+
+export interface CustomDomainStatus {
+  certificateStatus: string;
+  verified: boolean;
+  dnsRecords: DnsRecord[];
+}
+
+export interface CustomDomainSummary {
+  id: string;
+  domain: string;
+  targetPort: number | null;
+  status: CustomDomainStatus;
+}
+
+export async function fetchCustomDomains(
+  token: string,
+  projectId: string,
+  environmentId: string,
+  serviceId: string,
+): Promise<CustomDomainSummary[]> {
+  const result = await railwayGraphQL<{
+    domains: { customDomains: CustomDomainSummary[] };
+  }>(
+    token,
+    `
+    query($projectId: String!, $environmentId: String!, $serviceId: String!) {
+      domains(projectId: $projectId, environmentId: $environmentId, serviceId: $serviceId) {
+        customDomains {
+          id
+          domain
+          targetPort
+          status {
+            certificateStatus
+            verified
+            dnsRecords {
+              recordType
+              hostlabel
+              fqdn
+              requiredValue
+              currentValue
+              status
+              purpose
+              zone
+            }
+          }
+        }
+      }
+    }
+  `,
+    { projectId, environmentId, serviceId },
+  );
+  return result.domains.customDomains;
+}
+
+export async function createCustomDomain(
+  token: string,
+  projectId: string,
+  environmentId: string,
+  serviceId: string,
+  domain: string,
+  targetPort: number | undefined,
+): Promise<CustomDomainSummary> {
+  const result = await railwayGraphQL<{ customDomainCreate: CustomDomainSummary }>(
+    token,
+    `
+    mutation($input: CustomDomainCreateInput!) {
+      customDomainCreate(input: $input) {
+        id
+        domain
+        targetPort
+        status {
+          certificateStatus
+          verified
+          dnsRecords {
+            recordType
+            hostlabel
+            fqdn
+            requiredValue
+            currentValue
+            status
+            purpose
+            zone
+          }
+        }
+      }
+    }
+  `,
+    {
+      input: {
+        projectId,
+        environmentId,
+        serviceId,
+        domain,
+        ...(typeof targetPort === 'number' ? { targetPort } : {}),
+      },
+    },
+  );
+  return result.customDomainCreate;
+}
+
+/**
+ * Attach `domain` to the service (idempotent — an existing attachment is returned as-is). Railway
+ * issues the certificate once DNS points at it; `status.dnsRecords` lists what to create.
+ */
+export async function ensureCustomDomain(
+  token: string,
+  target: {
+    projectId: string;
+    environmentId: string;
+    serviceId: string;
+    domain: string;
+    targetPort?: number;
+  },
+): Promise<{ customDomain: CustomDomainSummary; created: boolean }> {
+  const existing = await fetchCustomDomains(
+    token,
+    target.projectId,
+    target.environmentId,
+    target.serviceId,
+  );
+  const match = existing.find(
+    (entry) => entry.domain.toLowerCase() === target.domain.toLowerCase(),
+  );
+  if (match) return { customDomain: match, created: false };
+  return {
+    customDomain: await createCustomDomain(
+      token,
+      target.projectId,
+      target.environmentId,
+      target.serviceId,
+      target.domain,
+      target.targetPort,
+    ),
+    created: true,
+  };
+}

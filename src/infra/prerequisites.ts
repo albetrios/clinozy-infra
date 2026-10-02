@@ -1,5 +1,8 @@
 import { execSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import * as logger from '@setup/common/logger.js';
+import { targetRoot } from '@setup/common/paths.js';
 import type { SetupConfig } from '@setup/common/types.js';
 
 interface PrerequisiteCheck {
@@ -69,6 +72,59 @@ function commandExists(command: string, versionFlag: string): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * True when `version` (e.g. `24.13.0`) meets a `>=X[.Y[.Z]]` engines range. Any other range shape
+ * is treated as satisfied — this is an early warning, not a semver implementation.
+ */
+export function satisfiesMinimumNode(range: string, version: string): boolean {
+  const minimum = /^\s*>=\s*v?(\d+)(?:\.(\d+))?(?:\.(\d+))?\s*$/.exec(range);
+  if (!minimum) return true;
+  const want = [minimum[1], minimum[2], minimum[3]].map((part) => Number(part ?? 0));
+  const have = version
+    .replace(/^v/, '')
+    .split('.')
+    .map((part) => Number(part));
+  for (let index = 0; index < 3; index += 1) {
+    const difference = (have[index] ?? 0) - (want[index] ?? 0);
+    if (difference !== 0) return difference > 0;
+  }
+  return true;
+}
+
+/** Providers that run the backend repo's own pnpm scripts, which enforce its `engines.node`. */
+const TARGET_SCRIPT_PROVIDERS = ['postman', 'scalar'];
+
+/**
+ * The backend's `pnpm docs:*` scripts refuse a Node older than its `engines.node`, which failed
+ * Postman and Scalar mid-run on the first clinozy provisioning. Check it before anything is created.
+ */
+function checkTargetNodeVersion(selectedProviderKeys?: ReadonlySet<string>): boolean {
+  if (
+    selectedProviderKeys &&
+    !TARGET_SCRIPT_PROVIDERS.some((key) => selectedProviderKeys.has(key))
+  ) {
+    return true;
+  }
+  let range: string | undefined;
+  try {
+    const manifest = JSON.parse(readFileSync(join(targetRoot(), 'package.json'), 'utf-8')) as {
+      engines?: { node?: string };
+    };
+    range = manifest.engines?.node;
+  } catch {
+    return true; // no readable target manifest — the providers report their own errors
+  }
+  if (!range) return true;
+  if (satisfiesMinimumNode(range, process.versions.node)) {
+    logger.success(`Node.js for the target repo — v${process.versions.node} (needs ${range})`);
+    return true;
+  }
+  logger.error(
+    `Node.js v${process.versions.node} is older than the target repo requires (${range}) — its docs scripts (Postman, Scalar) will refuse to run. Switch Node first (e.g. \`nvm use 24\`).`,
+  );
+  return false;
 }
 
 function isAuthenticated(authCommand: string): boolean {
@@ -143,6 +199,8 @@ export function checkPrerequisites(
       }
     }
   }
+
+  if (!checkTargetNodeVersion(selectedProviderKeys)) allPassed = false;
 
   logger.blank();
 

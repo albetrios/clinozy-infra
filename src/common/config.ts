@@ -74,7 +74,17 @@ export const setupConfigSchema = z.object({
    * Turnstile widget) — named `<product.name>-<env>` (e.g. `clinozy-development`). Optional;
    * defaults to `project.name` so existing configs keep backend-centric naming.
    */
-  product: z.object({ name: z.string().min(1) }).optional(),
+  product: z
+    .object({
+      name: z.string().min(1),
+      // The product's own domain (e.g. `clinozy.com`) — the single source for every public address:
+      // app.<domain> / api.<domain> in production, <env>--api.<domain> elsewhere, noreply@<domain>.
+      domain: z
+        .string()
+        .regex(/^(?!-)[a-z0-9-]+(\.[a-z0-9-]+)+$/, 'must be a bare domain like example.com')
+        .optional(),
+    })
+    .optional(),
   /**
    * Frontend (clinozy-fe) identity. `name` is the frontend's Sentry project (separate from the
    * backend project); `url` is the per-environment frontend origin (used for the Turnstile widget

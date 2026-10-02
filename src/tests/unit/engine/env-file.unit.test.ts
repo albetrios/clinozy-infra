@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { parseEnv, upsertEnv } from '@setup/engine/index.js';
+import { parseEnv, removeEnvKeys, upsertEnv } from '@setup/engine/index.js';
 
 function tmpEnv(initial: string): string {
   const dir = mkdtempSync(join(tmpdir(), 'clinozy-infra-envfile-'));
@@ -57,5 +57,18 @@ describe('upsertEnv', () => {
     expect(out).toContain('K=single');
     expect(out).not.toContain('line-b');
     expect(out).toContain('AFTER=here');
+  });
+});
+
+describe('removeEnvKeys', () => {
+  it('removes whole entries, multi-line values included, and leaves everything else', () => {
+    const text = ['# keep me', 'A=1', 'PEM="line1', 'line2"', 'B=2', ''].join('\n');
+    const { text: next, removed } = removeEnvKeys(text, ['PEM', 'MISSING']);
+    expect(next).toBe(['# keep me', 'A=1', 'B=2', ''].join('\n'));
+    expect(removed).toEqual(['PEM']);
+  });
+
+  it('returns the text untouched when nothing matches', () => {
+    expect(removeEnvKeys('A=1\n', ['B'])).toEqual({ text: 'A=1\n', removed: [] });
   });
 });

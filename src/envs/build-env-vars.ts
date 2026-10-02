@@ -7,26 +7,17 @@ import type {
   SetupState,
 } from '@setup/common/types.js';
 import { getInfraProviders } from '@setup/infra/providers/index.js';
-import { frontendOriginForEnvironment, productName } from '@setup/envs/env-file-setup.util.js';
+import {
+  allowedOriginsForEnvironment,
+  frontendOriginForEnvironment,
+  productName,
+} from '@setup/envs/env-file-setup.util.js';
 import { productNameOf } from '@setup/identity/identity.js';
 import { readEnvFile } from '@setup/envs/read-env-file.js';
 
 /** Defaults match .env.example (required at app runtime). */
 const DEFAULT_AUDIT_RETENTION_DAYS = '90';
 const DEFAULT_SESSION_RETENTION_DAYS = '30';
-
-function pickPerEnvironmentString(
-  perEnvironment: Record<string, string> | undefined,
-  environmentName: string,
-  defaultEnvironmentName: string | undefined,
-): string {
-  const explicit = perEnvironment?.[environmentName]?.trim();
-  if (explicit) return explicit;
-  if (defaultEnvironmentName && defaultEnvironmentName !== environmentName) {
-    return perEnvironment?.[defaultEnvironmentName]?.trim() ?? '';
-  }
-  return '';
-}
 
 /** Short environment tag for key prefixes; any other environment uses its own name. */
 const ENVIRONMENT_TAGS: Readonly<Record<string, string>> = {
@@ -92,14 +83,7 @@ export function buildEnvironmentVariables(
   state: SetupState,
 ): EnvironmentVariables {
   const environment = config.environments.find((env) => env.name === environmentName);
-  const defaultEnvironment =
-    config.environments.find((env) => env.isDefault)?.name ?? config.environments[0]?.name;
-
-  const allowedOrigins = pickPerEnvironmentString(
-    config.app.allowedOrigins,
-    environmentName,
-    defaultEnvironment,
-  );
+  const allowedOrigins = allowedOriginsForEnvironment(config, environmentName);
   // The backend reads FRONTEND_URL as the SPA origin (password-reset and invite links, the OAuth
   // redirect fallback, the WebAuthn expected origin), so it comes from `frontend.url` — never from
   // `app.frontendUrl`, which despite its name holds the API origin. No fallback to another

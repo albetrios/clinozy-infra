@@ -25,15 +25,16 @@ import { loadSecrets } from '@setup/common/secrets.js';
 import { writeSecretFile } from '@setup/common/secure-file.js';
 import { loadState } from '@setup/common/state.js';
 import type { SetupConfig, SetupSecrets, SetupState } from '@setup/common/types.js';
-import { upsertEnvContent } from '@setup/engine/index.js';
+import { removeEnvKeys, upsertEnvContent } from '@setup/engine/index.js';
 import { buildEnvironmentVariables } from './build-env-vars.js';
 import { escapeEnvValue } from './env-file-format.util.js';
 import {
-  FRONTEND_FALLBACK_HEADER,
   buildFrontendEnvContent,
   freshFrontendValues,
+  FRONTEND_FALLBACK_HEADER,
   frontendEnvFileName,
   frontendEnvFilePath,
+  retiredFrontendKeys,
 } from './frontend-env-keys.js';
 
 /**
@@ -69,6 +70,13 @@ export interface ExportResult {
   frontendMerged: string[];
 }
 
+/**
+ * Keys the backend env must NOT carry, removed on every export. `OTEL_SERVICE_NAME`: the backend
+ * names its API and worker processes itself (`<project>-api` / `<project>-worker`); an env value
+ * overrides both with one name, so the worker's traces show up as the API.
+ */
+const RETIRED_BACKEND_KEYS: readonly string[] = ['OTEL_SERVICE_NAME'];
+
 function writeBackendEnvFile(
   environmentName: string,
   config: SetupConfig,
@@ -80,7 +88,7 @@ function writeBackendEnvFile(
   const base = hadExisting ? readFileSync(filePath, 'utf-8') : seedFromExample(targetRoot(), '');
   const fresh = freshBackendValues(environmentName, config, secrets, state);
   const { text } = upsertEnvContent(base, fresh, escapeEnvValue);
-  writeSecretFile(filePath, text);
+  writeSecretFile(filePath, removeEnvKeys(text, RETIRED_BACKEND_KEYS).text);
   return hadExisting ? 'merged' : 'written';
 }
 
@@ -97,7 +105,10 @@ function writeFrontendEnvFile(
     : seedFromExample(frontendRoot(), `${FRONTEND_FALLBACK_HEADER}\n`);
   const fresh = freshFrontendValues(environmentName, config, secrets, state);
   const content = buildFrontendEnvContent(base, fresh);
-  writeSecretFile(filePath, content);
+  writeSecretFile(
+    filePath,
+    removeEnvKeys(content, retiredFrontendKeys(environmentName, config)).text,
+  );
   return hadExisting ? 'merged' : 'written';
 }
 

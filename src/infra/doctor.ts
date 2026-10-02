@@ -61,10 +61,11 @@ export function runDoctorChecks(config: SetupConfig, presets: readonly Preset[])
   // 4. Production environment with unset public URLs.
   for (const env of config.environments) {
     if (env.nodeEnvironment !== 'production') continue;
-    if (config.frontend?.name && !config.frontend.url?.[env.name]?.trim()) {
+    // Derived from product.domain when not set explicitly (frontendOriginForEnvironment).
+    if (config.frontend?.name && !frontendOriginForEnvironment(config, env.name)) {
       diagnostics.push({
         level: 'warn',
-        message: `frontend.url.${env.name} is empty for a production environment`,
+        message: `no frontend URL for production environment "${env.name}" — set product.domain (or frontend.url.${env.name})`,
       });
     }
   }

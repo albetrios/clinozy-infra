@@ -54,7 +54,14 @@ import { saveState } from '@setup/common/state.js';
 import { hydrateStateFromRemote } from '@setup/infra/orchestrator.js';
 import type { SetupState } from '@setup/common/types.js';
 import { type DownstreamHintInput, downstreamEnvHints } from './custom-domain-hints.js';
-import { ensureServiceDomain, railwayGraphQL } from './railway-api.js';
+import {
+  type CustomDomainStatus,
+  type CustomDomainSummary,
+  type DnsRecord,
+  createCustomDomain,
+  ensureServiceDomain,
+  fetchCustomDomains,
+} from './railway-api.js';
 
 // Railway certificate-status enum values that mean "ready". Treated case-insensitively.
 const READY_CERTIFICATE_STATUSES = new Set(['ISSUED', 'ACTIVE', 'ISSUE_SUCCESS']);
@@ -69,116 +76,6 @@ const FAILED_CERTIFICATE_STATUSES = new Set([
 
 const DEFAULT_WAIT_TIMEOUT_SECONDS = 900;
 const DEFAULT_POLL_INTERVAL_SECONDS = 10;
-
-interface DnsRecord {
-  recordType: string;
-  hostlabel: string;
-  fqdn: string;
-  requiredValue: string;
-  currentValue: string;
-  status: string;
-  purpose: string;
-  zone: string;
-}
-
-interface CustomDomainStatus {
-  certificateStatus: string;
-  verified: boolean;
-  dnsRecords: DnsRecord[];
-}
-
-interface CustomDomainSummary {
-  id: string;
-  domain: string;
-  targetPort: number | null;
-  status: CustomDomainStatus;
-}
-
-async function fetchCustomDomains(
-  token: string,
-  projectId: string,
-  environmentId: string,
-  serviceId: string,
-): Promise<CustomDomainSummary[]> {
-  const result = await railwayGraphQL<{
-    domains: { customDomains: CustomDomainSummary[] };
-  }>(
-    token,
-    `
-    query($projectId: String!, $environmentId: String!, $serviceId: String!) {
-      domains(projectId: $projectId, environmentId: $environmentId, serviceId: $serviceId) {
-        customDomains {
-          id
-          domain
-          targetPort
-          status {
-            certificateStatus
-            verified
-            dnsRecords {
-              recordType
-              hostlabel
-              fqdn
-              requiredValue
-              currentValue
-              status
-              purpose
-              zone
-            }
-          }
-        }
-      }
-    }
-  `,
-    { projectId, environmentId, serviceId },
-  );
-  return result.domains.customDomains;
-}
-
-async function createCustomDomain(
-  token: string,
-  projectId: string,
-  environmentId: string,
-  serviceId: string,
-  domain: string,
-  targetPort: number | undefined,
-): Promise<CustomDomainSummary> {
-  const result = await railwayGraphQL<{ customDomainCreate: CustomDomainSummary }>(
-    token,
-    `
-    mutation($input: CustomDomainCreateInput!) {
-      customDomainCreate(input: $input) {
-        id
-        domain
-        targetPort
-        status {
-          certificateStatus
-          verified
-          dnsRecords {
-            recordType
-            hostlabel
-            fqdn
-            requiredValue
-            currentValue
-            status
-            purpose
-            zone
-          }
-        }
-      }
-    }
-  `,
-    {
-      input: {
-        projectId,
-        environmentId,
-        serviceId,
-        domain,
-        ...(typeof targetPort === 'number' ? { targetPort } : {}),
-      },
-    },
-  );
-  return result.customDomainCreate;
-}
 
 interface PromptChoice {
   label: string;

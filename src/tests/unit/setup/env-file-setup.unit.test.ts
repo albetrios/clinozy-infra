@@ -11,6 +11,11 @@ import { usesEnvironmentFirstTraversal } from '@setup/common/interactive-step.js
 
 function configWithOrigins(frontendUrl: Record<string, string>): SetupConfig {
   return {
+    environments: [
+      { name: 'development', nodeEnvironment: 'development' },
+      { name: 'production', nodeEnvironment: 'production' },
+    ],
+    providers: {},
     frontend: { name: 'clinozy-fe', url: frontendUrl },
     // The API origin must never leak into the redirect URI.
     app: { frontendUrl: { development: 'http://localhost:3000', production: 'https://api.x.io' } },

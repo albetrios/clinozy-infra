@@ -40,8 +40,63 @@ export function oauthAppDisplayName(projectName: string, environmentName: string
 export function backendOriginForEnvironment(config: SetupConfig, environmentName: string): string {
   const configured = config.app.frontendUrl[environmentName];
   if (configured && configured.trim().length > 0) return configured.trim();
+  const host = apiHostForEnvironment(config, environmentName);
+  if (host) return `https://${host}`;
   if (environmentName === 'development') return 'http://localhost:3000';
   return '';
+}
+
+/** True when the environment deploys production (`nodeEnvironment: production`). */
+function isProductionEnvironment(config: SetupConfig, environmentName: string): boolean {
+  return (
+    config.environments.find((environment) => environment.name === environmentName)
+      ?.nodeEnvironment === 'production'
+  );
+}
+
+/**
+ * The API's public hostname under `product.domain`: `api.<domain>` in production,
+ * `<env>--api.<domain>` elsewhere — one label, so a `*.<domain>` certificate and Cloudflare's proxy
+ * cover every environment. `undefined` when no domain is configured.
+ */
+export function apiHostForEnvironment(
+  config: SetupConfig,
+  environmentName: string,
+): string | undefined {
+  const domain = config.product?.domain;
+  if (!domain) return undefined;
+  return isProductionEnvironment(config, environmentName)
+    ? `api.${domain}`
+    : `${environmentName}--api.${domain}`;
+}
+
+/**
+ * The frontend's public hostname: `app.<domain>` in production; other environments stay on their
+ * Netlify alias (`<env>--<site>.netlify.app`) — Netlify cannot put an alias deploy on a custom domain
+ * without Netlify DNS. `undefined` when neither source is configured.
+ */
+export function appHostForEnvironment(
+  config: SetupConfig,
+  environmentName: string,
+): string | undefined {
+  if (isProductionEnvironment(config, environmentName)) {
+    return config.product?.domain ? `app.${config.product.domain}` : undefined;
+  }
+  const site = config.frontend?.name;
+  return site && config.providers.netlify?.enabled
+    ? `${environmentName}--${site}.netlify.app`
+    : undefined;
+}
+
+/**
+ * CORS allowlist for an env: `app.allowedOrigins.<env>` when set, else the env's own frontend origin.
+ * No fallback to another environment — production must never inherit development's origins.
+ */
+export function allowedOriginsForEnvironment(config: SetupConfig, environmentName: string): string {
+  return (
+    config.app.allowedOrigins[environmentName]?.trim() ||
+    frontendOriginForEnvironment(config, environmentName)
+  );
 }
 
 /**
@@ -134,6 +189,8 @@ export function productResourceName(config: SetupConfig, environmentName: string
 export function frontendOriginForEnvironment(config: SetupConfig, environmentName: string): string {
   const configured = config.frontend?.url?.[environmentName];
   if (configured && configured.trim().length > 0) return configured.trim();
+  const host = appHostForEnvironment(config, environmentName);
+  if (host) return `https://${host}`;
   if (environmentName === 'development') return 'http://localhost:5173';
   return '';
 }

@@ -18,7 +18,13 @@ export type {
 } from './types.js';
 export { defineConfig } from './types.js';
 
-export { parseEnv, upsertEnv, upsertEnvContent, type ValueFormatter } from './env-file.js';
+export {
+  parseEnv,
+  removeEnvKeys,
+  upsertEnv,
+  upsertEnvContent,
+  type ValueFormatter,
+} from './env-file.js';
 export { createState, type ResourceState, type State } from './state.js';
 export { createPrompter, type AskOptions, type Prompter } from './prompt.js';
 export { getProvider, register, registeredProviders } from './registry.js';

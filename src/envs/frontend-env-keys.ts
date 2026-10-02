@@ -48,6 +48,19 @@ export function frontendEnvFilePath(environmentName: string): string {
  * was kept out "of the committed env file" — but these files are not committed, and leaving the keys
  * out meant every one of them had to be pasted by hand.
  */
+/** The environment the frontend's automation jobs read from — the default one (development). */
+function frontendDefaultEnvironment(config: SetupConfig): string | undefined {
+  return (
+    config.environments.find((environment) => environment.isDefault)?.name ??
+    config.environments[0]?.name
+  );
+}
+
+/** Keys a frontend env file must not carry: the release token outside the default environment. */
+export function retiredFrontendKeys(environmentName: string, config: SetupConfig): string[] {
+  return environmentName === frontendDefaultEnvironment(config) ? [] : ['RELEASE_PLEASE_TOKEN'];
+}
+
 export function ciDeploySecrets(
   environmentName: string,
   config: SetupConfig,
@@ -67,11 +80,8 @@ export function ciDeploySecrets(
   // release-please in the frontend's CI — the same token the backend gets. The frontend reads it
   // from its default (development) environment only — "development, never production" in its
   // .github/environments/README.md — so no other environment's file gets it.
-  const defaultEnvironment =
-    config.environments.find((environment) => environment.isDefault)?.name ??
-    config.environments[0]?.name;
   if (
-    environmentName === defaultEnvironment &&
+    environmentName === frontendDefaultEnvironment(config) &&
     config.providers.github.enabled &&
     secrets.github?.token
   ) {
