@@ -11,19 +11,21 @@ so provisioning can evolve independently.
 Do these in order; `pnpm setup:infra:prereqs` checks all of them (every run also starts with it).
 
 1. **Tools**
-   - Node ≥ 24.15 and pnpm ≥ 11.1.1 — the strictest minimums across all three repos; the check fails
+   - Node ≥ 24.15 and pnpm ≥ 12.8.1 — the strictest minimums across all three repos; the check fails
      below them and warns when the repos' pinned versions (`.nvmrc`, `packageManager`) differ.
-     `nvm install 24 && nvm use 24` · `corepack enable` (this repo pins `pnpm@11.1.1`)
+     All three pin Node **24.21.0** (latest LTS) and **pnpm 12.8.1**: `nvm install 24.21.0 && nvm use` ·
+     `corepack enable` (pnpm 12 note: `pnpm -s` is gone — use `pnpm --reporter=silent`)
    - GitHub CLI — `brew install gh` · Railway CLI — `brew install railway`
 2. **Repos** — clone `clinozy-infra`, `clinozy-be` and `clinozy-fe` side by side, then `pnpm install` in
    each (setup runs the backend's own scripts and writes both apps' env files).
 3. **Logins**
    - Netlify — `npx netlify-cli login` (opens the browser). Netlify is used through this login only.
    - GitHub — `GITHUB_TOKEN` in `.setup/.setup-credentials`, or `gh auth login`. A fine-grained
-     [token](https://github.com/settings/tokens) needs, on **both** app repos: Administration and
-     Environments (read & write) — setup creates their GitHub Environments — and Secrets (read). It
-     also becomes the apps' `RELEASE_PLEASE_TOKEN` (Contents + Pull requests write). The check verifies
-     the login can manage both repos' environments.
+     [token](https://github.com/settings/tokens) needs, on **both** app repos: **Actions** (read) to
+     list GitHub Environments, **Administration** (read & write) to create them, **Environments**
+     (read & write) for their secrets. It also becomes the apps' `RELEASE_PLEASE_TOKEN` (Contents +
+     Pull requests write). The check lists both repos' environments and, on a denial, prints the
+     permission GitHub reports missing.
    - Railway — `RAILWAY_API_TOKEN` in `.setup/.setup-credentials` ([create one](https://railway.com/account/tokens)),
      or `railway login`.
    A missing GitHub or Railway token is asked for during the check.

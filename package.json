@@ -4,10 +4,10 @@
   "private": true,
   "type": "module",
   "description": "Standalone infrastructure provisioning tool (setup:infra) for the clinozy-be application repo.",
-  "packageManager": "pnpm@11.1.1",
+  "packageManager": "pnpm@12.8.1+sha512.f64ba907507f5ceafe06c8d38e6052d0179444580ec1279ddd5bfc11cb48aa8a2644b66598e07e761da84872a9fc57d5f902b87fa49d024198d558612aabbe45",
   "engines": {
     "node": ">=24.15",
-    "pnpm": ">=11.1.1"
+    "pnpm": ">=12.8.1"
   },
   "scripts": {
     "setup": "tsx src/setup.ts",
@@ -52,20 +52,20 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@aws-sdk/client-iam": "^3.1073.0",
-    "@aws-sdk/client-s3": "^3.1073.0",
-    "chalk": "^5.6.2",
-    "dotenv": "^17.4.2",
+    "@aws-sdk/client-iam": "^3.1145.0",
+    "@aws-sdk/client-s3": "^3.1145.0",
+    "chalk": "^6.0.1",
+    "dotenv": "^18.0.5",
     "libsodium-wrappers": "^0.8.4",
-    "ora": "^9.4.0",
+    "ora": "^9.4.1",
     "postgres": "^3.4.9",
-    "zod": "^4.4.3"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.0",
-    "@types/node": "^25.9.4",
-    "tsx": "^4.22.4",
-    "typescript": "^6.0.3",
-    "vitest": "^4.1.9"
+    "@biomejs/biome": "^2.5.15",
+    "@types/node": "^24.19.1",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
   }
 }

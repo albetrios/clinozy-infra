@@ -7,6 +7,7 @@ import { frontendRepository } from '@setup/common/config.js';
 import type { SetupConfig } from '@setup/common/types.js';
 import { type GithubEnvironmentApi, ensureGithubEnvironment } from '@setup/github/init.js';
 import { buildConfig } from '@setup/infra/init-wizard.js';
+import { acceptedGithubPermissions } from '@setup/infra/prerequisites.js';
 
 const fakeGithub = (existing: string[]) => {
   const created: string[] = [];
@@ -51,5 +52,19 @@ describe('frontendRepository', () => {
     };
     expect(frontendRepository(config)).toBe('acme-org/acme-fe');
     expect(frontendRepository({ ...config, frontend: undefined })).toBeUndefined();
+  });
+});
+
+describe('acceptedGithubPermissions', () => {
+  it("reads the permission GitHub says a fine-grained token lacks from a 403's headers", () => {
+    const response = [
+      'HTTP/2.0 403 Forbidden',
+      'X-Accepted-Github-Permissions: actions=read',
+      'X-Github-Media-Type: github.v3',
+      '',
+      '{"message":"Resource not accessible by personal access token"}',
+    ].join('\n');
+    expect(acceptedGithubPermissions(response)).toBe('actions=read');
+    expect(acceptedGithubPermissions('HTTP/2.0 404 Not Found')).toBeUndefined();
   });
 });

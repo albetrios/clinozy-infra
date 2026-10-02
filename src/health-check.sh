@@ -30,12 +30,12 @@ fi
 FAILS=0
 SUMMARY=""
 
-# phase "<label>" <script-name> — runs `pnpm -s <script-name>`, never aborts.
+# phase "<label>" <script-name> — runs `pnpm --reporter=silent <script-name>`, never aborts.
 phase() {
   label="$1"
   shift
   printf '%s▶ %s%s\n' "$BOLD" "$label" "$RESET"
-  if pnpm -s "$@"; then
+  if pnpm --reporter=silent "$@"; then
     SUMMARY="${SUMMARY}${GREEN}PASS${RESET}  ${label}\n"
   else
     SUMMARY="${SUMMARY}${RED}FAIL${RESET}  ${label}\n"
@@ -45,7 +45,7 @@ phase() {
 
 if [ "$FIX" -eq 1 ]; then
   echo "── auto-fix pass (lint + format) ──"
-  pnpm -s lint:fix || true
+  pnpm --reporter=silent lint:fix || true
   echo ""
 fi
 

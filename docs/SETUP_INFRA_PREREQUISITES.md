@@ -13,7 +13,7 @@ Only the providers that are `enabled: true` in `setup.config.json` need anything
 
 | Need | Why | Ready when |
 | --- | --- | --- |
-| **Node and pnpm** at least the strictest `engines` of the three repos (today Node ≥ 24.15, pnpm ≥ 11.1.1) | runs setup and the backend's docs scripts (Postman, Scalar) | checked at start; differing pins (`.nvmrc`, `packageManager`) are flagged |
+| **Node and pnpm** at least the strictest `engines` of the three repos (today Node ≥ 24.15, pnpm ≥ 12.8.1; all three pin Node 24.21.0 and pnpm 12.8.1) | runs setup and the backend's docs scripts (Postman, Scalar) | checked at start; differing pins (`.nvmrc`, `packageManager`) are flagged |
 | **Backend + frontend checked out next to this repo**, dependencies installed | setup writes their `.env.<environment>` files and runs the backend's scripts | `../<backend>` and `../<frontend>` exist; `pnpm install` done in each |
 | **GitHub CLI** (`gh`) | GitHub API: environments in both app repos, checklist checks | `GITHUB_TOKEN` in `.setup-credentials`, or `gh auth login` — and that login can manage GitHub Environments in both app repos |
 | **Railway CLI** (`railway`) | Railway project, services, tokens | `RAILWAY_API_TOKEN` in `.setup-credentials` (no `railway login` needed) |
@@ -32,7 +32,7 @@ Authoritative source: `pnpm setup:infra:preview` and `src/common/secrets.ts`.
 | **Sentry** | Auth token | `SENTRY_AUTH_TOKEN` | https://sentry.io/settings/auth-tokens/new-token/ |
 | **Resend** | API key | `RESEND_API_KEY` | https://resend.com/api-keys |
 | **Railway** (server **+ Redis**) | Account/project-wide token | `RAILWAY_API_TOKEN` | https://railway.com/account/tokens |
-| **GitHub** (GitHub Environments in both app repos; release token) | Personal access token — fine-grained: Administration + Environments (read & write), Secrets (read), Contents + Pull requests (write) on both app repos — or `gh auth login` | `GITHUB_TOKEN` | https://github.com/settings/tokens |
+| **GitHub** (GitHub Environments in both app repos; release token) | Personal access token — fine-grained, on both app repos: Actions (read), Administration (read & write), Environments (read & write), Contents + Pull requests (write) — or `gh auth login` | `GITHUB_TOKEN` | https://github.com/settings/tokens |
 | **Cloudflare Turnstile** | API token (Turnstile:Edit) + account id | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | https://dash.cloudflare.com/profile/api-tokens |
 | **Postman** | Account API key | `POSTMAN_API_KEY` | https://go.postman.co/settings/me/api-keys |
 | **Scalar** | Account API key | `SCALAR_API_KEY` (optional `SCALAR_NAMESPACE` / `SCALAR_SLUG`) | https://dashboard.scalar.com |

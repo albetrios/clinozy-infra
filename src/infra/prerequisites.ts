@@ -272,21 +272,37 @@ const LOGINS: LoginCheck[] = [
 ];
 
 /**
- * The GitHub provider creates GitHub Environments in both app repos, which needs more than read
- * access. Returns what is wrong, or undefined when the current login can list them in each repo.
+ * The fine-grained token permissions setup's GitHub work needs on both app repos (GitHub's
+ * "permissions required for fine-grained personal access tokens"): list/read GitHub Environments →
+ * Actions (read); create one → Administration (write); environment secrets and variables, as each
+ * app's `github:sync` and the checklist use them → Environments (read & write).
+ */
+export const GITHUB_TOKEN_PERMISSIONS =
+  'Actions (read), Administration (read & write), Environments (read & write)';
+
+/** `X-Accepted-GitHub-Permissions` from a `gh api -i` response — what GitHub says the token lacks. */
+export function acceptedGithubPermissions(response: string): string | undefined {
+  return /^x-accepted-github-permissions:\s*(.+)$/im.exec(response)?.[1]?.trim();
+}
+
+/**
+ * The GitHub provider lists and creates GitHub Environments in both app repos. Returns what is
+ * wrong — with the permission GitHub reports missing — or undefined when the login can list them.
  */
 function githubEnvironmentAccessProblem(config: SetupConfig): string | undefined {
   const repositories = [config.providers.github.repository, frontendRepository(config)].filter(
     (repository): repository is string => Boolean(repository),
   );
-  const denied = repositories.filter(
-    (repository) =>
-      ghTry(['api', `repos/${repository}/environments`], { timeoutMs: 15_000 }).status !== 0,
-  );
+  const denied = repositories.flatMap((repository) => {
+    const result = ghTry(['api', '-i', `repos/${repository}/environments`], { timeoutMs: 15_000 });
+    if (result.status === 0) return [];
+    const needs = acceptedGithubPermissions(`${result.stdout}\n${result.stderr}`);
+    return [`${repository}${needs ? ` (GitHub says it needs: ${needs})` : ''}`];
+  });
   if (denied.length === 0) return undefined;
   return (
-    `it cannot manage GitHub Environments in ${denied.join(', ')} — give the token Administration + ` +
-    'Environments (read & write) and Secrets (read) on both app repos (https://github.com/settings/tokens)'
+    `it cannot list GitHub Environments in ${denied.join(', ')} — a fine-grained token needs ` +
+    `${GITHUB_TOKEN_PERMISSIONS} on both app repos (https://github.com/settings/tokens)`
   );
 }
 

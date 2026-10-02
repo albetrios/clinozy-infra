@@ -3,3 +3,11 @@ autoInstallPeers: true
 # Allow only the build scripts clinozy-infra's toolchain needs (tsx/vitest → esbuild).
 allowBuilds:
   esbuild: true
+
+# pnpm's release-age safeguard holds back versions published very recently. These exact versions
+# were newer than its window when adopted (latest-toolchain upgrade); drop each entry once it has aged
+# past it. Any other version still goes through the safeguard.
+minimumReleaseAgeExclude:
+  - '@aws-sdk/client-iam@3.1145.0'
+  - '@aws-sdk/client-s3@3.1145.0'
+  - '@types/node@24.19.1'
