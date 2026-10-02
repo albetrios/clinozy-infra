@@ -13,6 +13,7 @@ import * as logger from '@setup/common/logger.js';
 import { isSecretFilled } from '@setup/common/secrets.js';
 import { setupFetch } from '@setup/common/setup-fetch.js';
 import { resourceStatus } from '@setup/common/interactive-step.js';
+import { ensureServiceDomain } from '@setup/railway/railway-api.js';
 import type {
   SetupConfig,
   SetupState,
@@ -292,6 +293,8 @@ async function mintProjectToken(options: {
  * image and start command.
  */
 export const RAILWAY_SERVICE_NAMES = ['api', 'worker'];
+/** The service that answers public HTTP (the worker has no inbound traffic). */
+const RAILWAY_PUBLIC_SERVICE = 'api';
 
 function formatRailwayEnvironmentPlan(config: SetupConfig): string {
   return config.environments
@@ -516,6 +519,33 @@ export async function provision(
         attachSpinner,
         `Attached ${pendingServices.length} service(s) to environment "${environmentName}"`,
       );
+    }
+
+    // The backend's public address: a Railway-generated domain on the API service per environment,
+    // reused when present. The frontend build needs it as VITE_API_BASE_URL; a custom domain from
+    // `pnpm setup:domain` still wins downstream (see deployedApiOrigin).
+    for (const environmentName of environments) {
+      const environmentState = railwayEnvironments[environmentName];
+      const apiService = environmentState?.services[RAILWAY_PUBLIC_SERVICE];
+      if (!(environmentState && apiService?.serviceId)) continue;
+      try {
+        const { domain, created } = await ensureServiceDomain(apiToken, {
+          projectId: railwayProjectId,
+          environmentId: environmentState.environmentId,
+          serviceId: apiService.serviceId,
+          targetPort: config.app.port,
+        });
+        environmentState.services[RAILWAY_PUBLIC_SERVICE] = {
+          ...apiService,
+          url: `https://${domain.domain}`,
+        };
+        logger.success(
+          `  API domain for "${environmentName}" ${created ? 'created' : 'found'}: https://${domain.domain}`,
+        );
+      } catch (domainError) {
+        const message = domainError instanceof Error ? domainError.message : String(domainError);
+        logger.warn(`  Could not ensure an API domain for "${environmentName}": ${message}`);
+      }
     }
 
     // Mint a per-environment project token for every configured environment.

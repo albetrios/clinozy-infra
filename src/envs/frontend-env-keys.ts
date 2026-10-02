@@ -12,6 +12,7 @@ import { frontendRoot } from '@setup/common/paths.js';
 import type { SetupConfig, SetupSecrets, SetupState } from '@setup/common/types.js';
 import { upsertEnvContent } from '@setup/engine/index.js';
 import { resolveEnvironmentVariables } from '@setup/envs/build-env-vars.js';
+import { deployedApiOrigin } from '@setup/envs/env-file-setup.util.js';
 import { escapeEnvValue } from '@setup/envs/env-file-format.util.js';
 
 /** Canonical backend key → Vite env name for clinozy-fe. All values are public (browser-safe). */
@@ -96,6 +97,10 @@ export function freshFrontendValues(
     const value = variables[canonical] ?? '';
     if (value !== '') fresh[vite] = value;
   }
+  // The deployed API the hosted SPA calls (Railway custom domain, else its generated domain). Absent
+  // until the Railway provider has recorded it, so a stateless export keeps the existing value.
+  const apiOrigin = deployedApiOrigin(state, environmentName);
+  if (apiOrigin) fresh.VITE_API_BASE_URL = apiOrigin;
   // Non-VITE, build-time Sentry identifiers for clinozy-fe's sourcemap upload — public, sourced from
   // config (single source of truth). The token half comes with the other CI secrets below.
   if (config.providers.sentry.enabled) {

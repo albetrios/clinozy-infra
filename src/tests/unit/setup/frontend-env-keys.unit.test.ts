@@ -125,6 +125,29 @@ describe('frontend env export (surgical)', () => {
     expect(content).toContain('VITE_CAPTCHA_DISABLED=false');
   });
 
+  it('writes VITE_API_BASE_URL from the deployed API recorded by the Railway provider', () => {
+    const withApi = {
+      ...stateWithPosthog,
+      railway: {
+        projectId: 'p',
+        services: {},
+        environments: {
+          development: {
+            environmentId: 'e',
+            services: { api: { serviceId: 's', url: 'https://api-dev-1234.up.railway.app' } },
+          },
+        },
+      },
+    } as unknown as SetupState;
+    expect(freshFrontendValues('development', baseConfig, emptySecrets, withApi)).toMatchObject({
+      VITE_API_BASE_URL: 'https://api-dev-1234.up.railway.app',
+    });
+    // Nothing recorded → nothing written, so an existing value is kept.
+    expect(
+      freshFrontendValues('development', baseConfig, emptySecrets, stateWithPosthog),
+    ).not.toHaveProperty('VITE_API_BASE_URL');
+  });
+
   it('writes build-time SENTRY_ORG + SENTRY_PROJECT from config', () => {
     const existing = [
       'SENTRY_AUTH_TOKEN=',

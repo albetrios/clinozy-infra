@@ -56,8 +56,19 @@ export function resolveEnvironmentApiBaseUrl(
   state: SetupState,
   environmentName: string,
 ): string {
-  const configured = backendOriginForEnvironment(config, environmentName);
-  if (configured) return configured;
+  return (
+    backendOriginForEnvironment(config, environmentName) ||
+    deployedApiOrigin(state, environmentName)
+  );
+}
+
+/**
+ * The deployed API's public origin for an env, from Railway state: a custom domain (from
+ * `pnpm setup:domain`) wins over the Railway-generated service domain. '' when nothing is deployed
+ * or recorded. This — not `app.frontendUrl`, which holds the local dev origin — is what the
+ * hosted frontend must call (VITE_API_BASE_URL).
+ */
+export function deployedApiOrigin(state: SetupState, environmentName: string): string {
   const services = [
     ...Object.values(state.railway?.environments?.[environmentName]?.services ?? {}),
     ...Object.values(state.railway?.services ?? {}),

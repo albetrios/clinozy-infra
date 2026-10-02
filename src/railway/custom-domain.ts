@@ -48,15 +48,13 @@
 import { promises as dns } from 'node:dns';
 import { createInterface } from 'node:readline';
 import * as logger from '@setup/common/logger.js';
-import { setupFetch } from '@setup/common/setup-fetch.js';
 import { loadConfig } from '@setup/common/config.js';
 import { loadEnvSetupIntoProcess } from '@setup/common/secrets.js';
 import { saveState } from '@setup/common/state.js';
 import { hydrateStateFromRemote } from '@setup/infra/orchestrator.js';
 import type { SetupState } from '@setup/common/types.js';
 import { type DownstreamHintInput, downstreamEnvHints } from './custom-domain-hints.js';
-
-const RAILWAY_API_URL = 'https://backboard.railway.com/graphql/v2';
+import { ensureServiceDomain, railwayGraphQL } from './railway-api.js';
 
 // Railway certificate-status enum values that mean "ready". Treated case-insensitively.
 const READY_CERTIFICATE_STATUSES = new Set(['ISSUED', 'ACTIVE', 'ISSUE_SUCCESS']);
@@ -71,43 +69,6 @@ const FAILED_CERTIFICATE_STATUSES = new Set([
 
 const DEFAULT_WAIT_TIMEOUT_SECONDS = 900;
 const DEFAULT_POLL_INTERVAL_SECONDS = 10;
-
-async function railwayGraphQL<T>(
-  token: string,
-  query: string,
-  variables?: Record<string, unknown>,
-): Promise<T> {
-  const response = await setupFetch({
-    name: 'Railway',
-    url: RAILWAY_API_URL,
-    init: {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query, variables }),
-    },
-  });
-
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Railway GraphQL failed (${response.status}): ${body}`);
-  }
-
-  const result = (await response.json()) as { data?: T; errors?: Array<{ message: string }> };
-
-  if (result.errors?.length) {
-    throw new Error(
-      `Railway GraphQL errors: ${result.errors.map((error) => error.message).join('; ')}`,
-    );
-  }
-
-  return result.data as T;
-}
-
-interface ServiceDomain {
-  id: string;
-  domain: string;
-  targetPort: number | null;
-}
 
 interface DnsRecord {
   recordType: string;
@@ -131,32 +92,6 @@ interface CustomDomainSummary {
   domain: string;
   targetPort: number | null;
   status: CustomDomainStatus;
-}
-
-async function fetchServiceDomains(
-  token: string,
-  projectId: string,
-  environmentId: string,
-  serviceId: string,
-): Promise<ServiceDomain[]> {
-  const result = await railwayGraphQL<{
-    domains: { serviceDomains: ServiceDomain[] };
-  }>(
-    token,
-    `
-    query($projectId: String!, $environmentId: String!, $serviceId: String!) {
-      domains(projectId: $projectId, environmentId: $environmentId, serviceId: $serviceId) {
-        serviceDomains {
-          id
-          domain
-          targetPort
-        }
-      }
-    }
-  `,
-    { projectId, environmentId, serviceId },
-  );
-  return result.domains.serviceDomains;
 }
 
 async function fetchCustomDomains(
@@ -197,34 +132,6 @@ async function fetchCustomDomains(
     { projectId, environmentId, serviceId },
   );
   return result.domains.customDomains;
-}
-
-async function createServiceDomain(
-  token: string,
-  environmentId: string,
-  serviceId: string,
-  targetPort: number | undefined,
-): Promise<ServiceDomain> {
-  const result = await railwayGraphQL<{ serviceDomainCreate: ServiceDomain }>(
-    token,
-    `
-    mutation($input: ServiceDomainCreateInput!) {
-      serviceDomainCreate(input: $input) {
-        id
-        domain
-        targetPort
-      }
-    }
-  `,
-    {
-      input: {
-        environmentId,
-        serviceId,
-        ...(typeof targetPort === 'number' ? { targetPort } : {}),
-      },
-    },
-  );
-  return result.serviceDomainCreate;
 }
 
 async function createCustomDomain(
@@ -841,25 +748,14 @@ async function runOne(input: RunOneInput): Promise<RunOneOutput> {
 
   logger.info(`[${environment.name}/${service.name}] attaching ${domain} (port ${targetPort})...`);
 
-  const existingServiceDomains = await fetchServiceDomains(
-    token,
+  const { domain: serviceDomain, created } = await ensureServiceDomain(token, {
     projectId,
-    environment.environmentId,
-    service.serviceId,
-  );
-  let serviceDomain = existingServiceDomains[0];
-  if (serviceDomain) {
-    logger.info(`  Service domain already exists: ${serviceDomain.domain}`);
-  } else {
-    logger.info('  Creating Railway service domain...');
-    serviceDomain = await createServiceDomain(
-      token,
-      environment.environmentId,
-      service.serviceId,
-      targetPort,
-    );
-    logger.success(`  Service domain created: ${serviceDomain.domain}`);
-  }
+    environmentId: environment.environmentId,
+    serviceId: service.serviceId,
+    targetPort,
+  });
+  if (created) logger.success(`  Service domain created: ${serviceDomain.domain}`);
+  else logger.info(`  Service domain already exists: ${serviceDomain.domain}`);
 
   const existingCustomDomains = await fetchCustomDomains(
     token,
