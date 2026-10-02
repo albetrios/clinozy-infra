@@ -14,6 +14,7 @@ import { buildConfig } from '@setup/infra/init-wizard.js';
 import {
   type NextStepChecks,
   buildNextSteps,
+  isStripeWebhookSigningSecret,
   mergeDnsRequirements,
 } from '@setup/infra/next-steps.js';
 import {
@@ -133,21 +134,24 @@ describe('buildNextSteps', () => {
       app: { ...base.app, frontendUrl: {} }, // derive the API hosts from product.domain
       providers: { ...base.providers, stripe: { ...base.providers.stripe, enabled: true } },
     };
-    const values = (secretKey: (environment: string) => string) =>
+    const values = (secretKey: (environment: string) => string, webhookSecret: string) =>
       checks({
         envValue: (environment, key) =>
           ({
             STRIPE_SECRET_KEY: secretKey(environment),
-            STRIPE_WEBHOOK_SECRET: 'whsec_x',
+            STRIPE_WEBHOOK_SECRET: webhookSecret,
             STRIPE_PUBLISHABLE_KEY: 'pk_x',
           })[key],
       });
-    const stripeStep = async (secretKey: (environment: string) => string) =>
+    const stripeStep = async (
+      secretKey: (environment: string) => string,
+      webhookSecret = 'whsec_x',
+    ) =>
       (
         await buildNextSteps({
           config: stripeConfig,
           dnsRecords: records,
-          checks: values(secretKey),
+          checks: values(secretKey, webhookSecret),
         })
       ).find((step) => step.title.startsWith('Stripe'));
 
@@ -165,6 +169,26 @@ describe('buildNextSteps', () => {
     expect(testInProduction?.lines).toContainEqual(
       expect.stringMatching(/^✗ production: .*sk_live_/),
     );
+
+    // A destination id or an API key in place of the signing secret stops the backend's deploy.
+    const liveKeys = (environment: string) =>
+      environment === 'production' ? 'sk_live_x' : 'sk_test_x';
+    const wrongWebhookSecret = await stripeStep(liveKeys, 'we_1Destination');
+    expect(wrongWebhookSecret?.status).toBe('todo');
+    expect(wrongWebhookSecret?.lines).toContainEqual(
+      expect.stringMatching(/✗ STRIPE_WEBHOOK_SECRET \(not a signing secret — needs .*whsec_/),
+    );
+    // A rotation list of signing secrets is fine.
+    expect((await stripeStep(liveKeys, 'whsec_old, whsec_new'))?.status).toBe('manual');
+  });
+
+  it('accepts only Stripe signing secrets, alone or as a rotation list', () => {
+    expect(isStripeWebhookSigningSecret('whsec_abc')).toBe(true);
+    expect(isStripeWebhookSigningSecret('whsec_old,whsec_new')).toBe(true);
+    expect(isStripeWebhookSigningSecret('we_1Destination')).toBe(false);
+    expect(isStripeWebhookSigningSecret('sk_test_x')).toBe(false);
+    expect(isStripeWebhookSigningSecret('whsec_ok,we_1Bad')).toBe(false);
+    expect(isStripeWebhookSigningSecret(' , ')).toBe(false);
   });
 
   it('lists the Google redirect URIs and asks for missing client credentials', async () => {

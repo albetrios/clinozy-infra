@@ -159,6 +159,19 @@ function liveChecks(): NextStepChecks {
 
 const mark = (ok: boolean | undefined): string => (ok === true ? '✓' : ok === false ? '✗' : '?');
 
+/**
+ * The backend accepts STRIPE_WEBHOOK_SECRET only as a signing secret (`whsec_…`), or a
+ * comma-separated list of them during a rotation; anything else — a destination id (`we_…`), an
+ * API key — fails its env check and stops the deploy at the migrations.
+ */
+export function isStripeWebhookSigningSecret(value: string): boolean {
+  const secrets = value
+    .split(',')
+    .map((secret) => secret.trim())
+    .filter(Boolean);
+  return secrets.length > 0 && secrets.every((secret) => secret.startsWith('whsec_'));
+}
+
 /** Build the ordered checklist. */
 export async function buildNextSteps(options: {
   config: SetupConfig;
@@ -273,20 +286,28 @@ export async function buildNextSteps(options: {
   if (config.providers.stripe.enabled) {
     const stripeKeys = environments.map((environment) => {
       const secretKey = checks.envValue(environment, 'STRIPE_SECRET_KEY') ?? '';
+      const webhookSecret = checks.envValue(environment, 'STRIPE_WEBHOOK_SECRET') ?? '';
       const production =
         config.environments.find((entry) => entry.name === environment)?.nodeEnvironment ===
         'production';
       return {
         environment,
         secret: Boolean(secretKey),
-        webhook: has(environment, 'STRIPE_WEBHOOK_SECRET'),
+        webhook: webhookSecret !== '',
+        webhookNotSigningSecret:
+          webhookSecret !== '' && !isStripeWebhookSigningSecret(webhookSecret),
         publishable: has(environment, 'STRIPE_PUBLISHABLE_KEY'),
         // The backend refuses to start production on anything but a live-mode key.
         testKeyInProduction: production && secretKey !== '' && !secretKey.startsWith('sk_live_'),
       };
     });
     const complete = stripeKeys.every(
-      (entry) => entry.secret && entry.webhook && entry.publishable && !entry.testKeyInProduction,
+      (entry) =>
+        entry.secret &&
+        entry.webhook &&
+        !entry.webhookNotSigningSecret &&
+        entry.publishable &&
+        !entry.testKeyInProduction,
     );
     steps.push({
       title: 'Stripe — keys and the billing webhook for each environment',
@@ -294,7 +315,7 @@ export async function buildNextSteps(options: {
       lines: [
         ...stripeKeys.map(
           (entry) =>
-            `${mark(entry.secret && !entry.testKeyInProduction)} ${entry.environment}: STRIPE_SECRET_KEY${entry.testKeyInProduction ? ' (not a live key — production needs sk_live_)' : ''} · ${mark(entry.webhook)} STRIPE_WEBHOOK_SECRET · ${mark(entry.publishable)} STRIPE_PUBLISHABLE_KEY (→ frontend VITE_STRIPE_PUBLISHABLE_KEY)`,
+            `${mark(entry.secret && !entry.testKeyInProduction)} ${entry.environment}: STRIPE_SECRET_KEY${entry.testKeyInProduction ? ' (not a live key — production needs sk_live_)' : ''} · ${mark(entry.webhook && !entry.webhookNotSigningSecret)} STRIPE_WEBHOOK_SECRET${entry.webhookNotSigningSecret ? " (not a signing secret — needs the destination's whsec_…)" : ''} · ${mark(entry.publishable)} STRIPE_PUBLISHABLE_KEY (→ frontend VITE_STRIPE_PUBLISHABLE_KEY)`,
         ),
         "Stripe Workbench → Webhooks → Create an event destination (sandbox for development, live for production; API version = the backend's STRIPE_API_VERSION), then Reveal secret:",
         ...environments.map(
