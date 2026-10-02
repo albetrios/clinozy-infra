@@ -386,12 +386,12 @@ export async function buildNextSteps(options: {
     ],
   });
   steps.push({
-    title: "Go live — merge each app's Release PR, then deploy it from main",
+    title: "Go live — merge each app's Release PR",
     status: 'manual',
     lines: [
-      'Merging the release-please Release PR creates the release tag. Production accepts protected',
-      'branches only, so the release does not deploy by itself:',
-      "  pnpm setup:infra:deploy --production   (release-deploy.yml from main with each app's latest tag)",
+      'Merging the release-please Release PR publishes the release, and its release-deploy.yml run',
+      'deploys production (pinned to the tag). A failed release deploy, or another tag:',
+      '  pnpm setup:infra:deploy --production [--app backend|frontend --tag vX.Y.Z]',
     ],
   });
   return steps;

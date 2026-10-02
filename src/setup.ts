@@ -156,7 +156,7 @@ function printHelp(): void {
     '  pnpm setup --doctor                  Validate config + flag footguns (also runs first inside --plan)',
   );
   logger.info(
-    '  pnpm setup --deploy [--production]   Attestations switch + re-run failed post-merge CI; --production deploys each latest release from main (--app backend|frontend, --tag vX.Y.Z)',
+    '  pnpm setup --deploy [--production]   Attestations switch + re-run failed post-merge CI; --production re-deploys each latest release from main (--app backend|frontend, --tag vX.Y.Z)',
   );
   logger.info(
     '  pnpm setup --example [--force]       Emit committable .env.example files (keys + comments) for both targets',
