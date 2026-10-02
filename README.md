@@ -59,7 +59,7 @@ Every credential and what gets created: [docs/SETUP_INFRA_PREREQUISITES.md](docs
 | 5 | Merge each app's release-please Release PR (`chore(main): release X.Y.Z`) → release tag | on GitHub (squash) |
 | 6 | Deploy each app's latest release to production, from `main` | `pnpm setup:infra:deploy --production` |
 
-What `pnpm setup:infra:deploy` does, per app:
+What `pnpm setup:infra:deploy` does, per app — as your own `gh auth login` (an owner of both app repos), not setup's narrower `GITHUB_TOKEN`:
 
 1. **Artifact attestations.** GitHub stores them for a private repository only on GitHub Enterprise
    Cloud. Where the plan can't, it sets the repository variable `ARTIFACT_ATTESTATIONS=disabled` (the

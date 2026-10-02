@@ -12,6 +12,10 @@
  *      latest release tag: the production environment accepts protected branches only, so a
  *      published release does not deploy by itself.
  *
+ * Runs as the operator's own `gh auth login`, not setup's GITHUB_TOKEN: shipping sets repository
+ * variables, re-runs and starts workflows and reads the organization's plan — more than that
+ * token is scoped for.
+ *
  * NAMING (single source of truth = setup.config.json): the repositories come from
  * `providers.github.repository` and `frontendRepository(config)`.
  */
@@ -21,7 +25,7 @@ import * as logger from '@setup/common/logger.js';
 import { isAssumeYes, question } from '@setup/common/prompts.js';
 import { SetupError } from '@setup/common/setup-error.js';
 import type { SetupConfig } from '@setup/common/types.js';
-import { ghTry } from '@setup/github/gh.js';
+import { ghTry, operatorGhEnv } from '@setup/github/gh.js';
 
 export const ATTESTATIONS_VARIABLE = 'ARTIFACT_ATTESTATIONS';
 const POST_MERGE_WORKFLOW = 'post-merge-ci.yml';
@@ -55,6 +59,8 @@ export interface WorkflowRun {
 
 /** The GitHub calls the command makes — injectable, so the flow is testable without network. */
 export interface DeployGithub {
+  /** The login the calls run as; undefined when `gh` isn't logged in. */
+  login(): string | undefined;
   repository(
     repository: string,
   ): { isPrivate: boolean; ownerType: string; ownerLogin: string } | undefined;
@@ -166,7 +172,7 @@ export async function deployProduction(
 
 /** `gh` with JSON output → parsed value; undefined on any failure (404 included). */
 function ghJsonOrUndefined<T>(args: string[]): T | undefined {
-  const result = ghTry(args, { timeoutMs: 20_000 });
+  const result = ghTry(args, { timeoutMs: 20_000, env: operatorGhEnv() });
   if (result.status !== 0) return undefined;
   try {
     return JSON.parse(result.stdout) as T;
@@ -176,7 +182,7 @@ function ghJsonOrUndefined<T>(args: string[]): T | undefined {
 }
 
 function ghWrite(args: string[]): void {
-  const result = ghTry(args, { timeoutMs: 30_000 });
+  const result = ghTry(args, { timeoutMs: 30_000, env: operatorGhEnv() });
   if (result.status !== 0) {
     throw new SetupError(
       `gh ${args.slice(0, 3).join(' ')} failed: ${result.stderr.trim() || result.stdout.trim()}`,
@@ -184,8 +190,9 @@ function ghWrite(args: string[]): void {
   }
 }
 
-/** The real GitHub, through the `gh` CLI (GITHUB_TOKEN when set, otherwise `gh auth login`). */
+/** The real GitHub, through the `gh` CLI as the operator's own login. */
 export const ghDeployGithub: DeployGithub = {
+  login: () => ghJsonOrUndefined<{ login?: string }>(['api', 'user'])?.login,
   repository: (repository) => {
     const repo = ghJsonOrUndefined<{
       private?: boolean;
@@ -280,6 +287,13 @@ export async function runDeploy(
   github: DeployGithub = ghDeployGithub,
 ): Promise<void> {
   const apps = selectedApps(config, options);
+  const login = github.login();
+  if (!login) {
+    throw new SetupError(
+      'pnpm setup:infra:deploy runs as your own GitHub login (not .setup-credentials GITHUB_TOKEN) — run `gh auth login` as an owner of the app repositories.',
+    );
+  }
+  logger.info(`GitHub login: ${login}`);
   logger.stepHeader(1, 3, 'Artifact attestations');
   for (const app of apps) logger.infoRaw(reconcileAttestations(github, app));
   logger.stepHeader(2, 3, `Post-merge CI on ${TRUNK} (deploys development)`);

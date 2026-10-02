@@ -17,6 +17,8 @@ export interface RunCommandOptions {
   input?: string;
   /** Working directory for the child process. */
   cwd?: string;
+  /** Environment for the child process (default: this process's). */
+  env?: NodeJS.ProcessEnv;
   timeoutMs?: number;
   /** Return the result instead of throwing on a non-zero exit. */
   allowFailure?: boolean;
@@ -35,6 +37,7 @@ export function runCommand(command: string, options: RunCommandOptions = {}): Ru
     timeout: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     ...(options.input !== undefined ? { input: options.input } : {}),
     ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
+    ...(options.env !== undefined ? { env: options.env } : {}),
   });
   const status = result.status ?? 1;
   const out = { status, stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
