@@ -48,6 +48,36 @@ pnpm setup:infra:next          # what is left to do by hand, with live checks
 
 Every credential and what gets created: [docs/SETUP_INFRA_PREREQUISITES.md](docs/SETUP_INFRA_PREREQUISITES.md).
 
+## Go live — step by step
+
+| # | Step | Command |
+| --- | --- | --- |
+| 1 | Provision every service and write both apps' `.env.<environment>` | `pnpm setup:infra` |
+| 2 | Do what's left by hand — DNS, sign-in callback URLs, Stripe webhooks — until each is ✓ | `pnpm setup:infra:next` |
+| 3 | Push each app's env files to its GitHub Environments | in each app: `pnpm github:sync` |
+| 4 | Attestations switch + re-run the failed post-merge CI on `main` → development deploys | `pnpm setup:infra:deploy` |
+| 5 | Merge each app's release-please Release PR (`chore(main): release X.Y.Z`) → release tag | on GitHub (squash) |
+| 6 | Deploy each app's latest release to production, from `main` | `pnpm setup:infra:deploy --production` |
+
+What `pnpm setup:infra:deploy` does, per app:
+
+1. **Artifact attestations.** GitHub stores them for a private repository only on GitHub Enterprise
+   Cloud. Where the plan can't, it sets the repository variable `ARTIFACT_ATTESTATIONS=disabled` (the
+   apps' attest steps then skip with a warning); where it can, it removes the variable.
+2. **Post-merge CI.** Re-runs the failed jobs of the latest `post-merge-ci.yml` run on `main`.
+3. **Production** (`--production` only). Runs `release-deploy.yml` from `main` with the app's latest
+   release tag, after a `y/N` confirmation (`--yes` skips it). Production accepts protected branches
+   only, so publishing a release doesn't deploy by itself. One app or an older tag:
+   `--app backend|frontend` and `--tag vX.Y.Z`.
+
+By hand, the same steps for one app:
+
+```bash
+gh variable set ARTIFACT_ATTESTATIONS --body disabled --repo <owner>/<app>   # private repo, not Enterprise
+gh run rerun <run-id> --failed --repo <owner>/<app>                          # gh run list --workflow post-merge-ci.yml --branch main
+gh workflow run release-deploy.yml --repo <owner>/<app> --ref main -f tag=vX.Y.Z
+```
+
 ## Docs
 
 | Doc | For |

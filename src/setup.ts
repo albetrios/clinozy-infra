@@ -13,6 +13,7 @@ import { runInitWizard } from './infra/init-wizard.js';
 import { runDoctor } from './infra/doctor.js';
 import { runPrerequisitesCheck } from './infra/prerequisites.js';
 import { runNextSteps } from './infra/next-steps.js';
+import { runDeploy } from './infra/deploy.js';
 import { loadConfig } from './common/config.js';
 import { runExample } from './infra/example.js';
 import { runGuide } from './infra/setup-guide/index.js';
@@ -75,6 +76,7 @@ function getCommand(): string {
   if (args.includes('--prereqs')) return 'prereqs';
   if (args.includes('--doctor')) return 'doctor';
   if (args.includes('--next')) return 'next';
+  if (args.includes('--deploy')) return 'deploy';
   if (args.includes('--example')) return 'example';
   if (args.includes('--guide')) return 'guide';
   if (args.includes('--vault')) return 'vault';
@@ -154,6 +156,9 @@ function printHelp(): void {
     '  pnpm setup --doctor                  Validate config + flag footguns (also runs first inside --plan)',
   );
   logger.info(
+    '  pnpm setup --deploy [--production]   Attestations switch + re-run failed post-merge CI; --production deploys each latest release from main (--app backend|frontend, --tag vX.Y.Z)',
+  );
+  logger.info(
     '  pnpm setup --example [--force]       Emit committable .env.example files (keys + comments) for both targets',
   );
   logger.info(
@@ -224,6 +229,16 @@ async function main(): Promise<void> {
         await runNextSteps(config);
         break;
       }
+      case 'deploy':
+        await runDeploy(
+          loadConfig(),
+          omitUndefined({
+            production: args.includes('--production') || undefined,
+            tag: parseStringFlag('--tag'),
+            app: parseStringFlag('--app'),
+          }),
+        );
+        break;
       case 'example':
         runExample(omitUndefined({ force: args.includes('--force') || undefined }));
         break;
