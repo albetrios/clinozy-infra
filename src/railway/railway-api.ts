@@ -41,6 +41,38 @@ export async function railwayGraphQL<T>(
   return result.data as T;
 }
 
+/**
+ * Make one service variable hold `value` in one environment: read first, write only on a
+ * difference, and never trigger a deploy (`skipDeploys` — the app's own pipeline deploys). Returns
+ * whether it changed.
+ */
+export async function ensureServiceVariable(
+  token: string,
+  input: {
+    projectId: string;
+    environmentId: string;
+    serviceId: string;
+    name: string;
+    value: string;
+  },
+): Promise<boolean> {
+  const { projectId, environmentId, serviceId, name, value } = input;
+  const current = await railwayGraphQL<{ variables: Record<string, string> }>(
+    token,
+    `query($projectId: String!, $environmentId: String!, $serviceId: String!) {
+      variables(projectId: $projectId, environmentId: $environmentId, serviceId: $serviceId, unrendered: true)
+    }`,
+    { projectId, environmentId, serviceId },
+  );
+  if (current.variables[name] === value) return false;
+  await railwayGraphQL(
+    token,
+    `mutation($input: VariableUpsertInput!) { variableUpsert(input: $input) }`,
+    { input: { projectId, environmentId, serviceId, name, value, skipDeploys: true } },
+  );
+  return true;
+}
+
 export interface ServiceDomain {
   id: string;
   domain: string;
@@ -139,6 +171,30 @@ export interface CustomDomainStatus {
   certificateStatus: string;
   verified: boolean;
   dnsRecords: DnsRecord[];
+  /** Ownership TXT record Railway asks for, relative to the zone — e.g. `_railway-verify.api`. */
+  verificationDnsHost?: string | null;
+  /** Its value — e.g. `railway-verify=4f78…`. Public by design: it goes into DNS. */
+  verificationToken?: string | null;
+}
+
+/**
+ * The `_railway-verify` TXT record Railway needs before it verifies a custom domain and issues its
+ * certificate, as a full DNS name. `verificationDnsHost` is relative to the domain's zone
+ * (`_railway-verify.development--api` for `development--api.clinozy.com`), so the zone is the
+ * domain minus that label — or the zone Railway reports on the domain's own DNS records.
+ */
+export function railwayVerificationRecord(
+  domain: string,
+  status: CustomDomainStatus,
+): { name: string; value: string } | undefined {
+  const host = status.verificationDnsHost;
+  const value = status.verificationToken;
+  if (!host || !value) return undefined;
+  const label = host.replace(/^_railway-verify\.?/, '');
+  const zone =
+    status.dnsRecords.find((record) => record.zone)?.zone ??
+    (label && domain.startsWith(`${label}.`) ? domain.slice(label.length + 1) : domain);
+  return { name: `${host}.${zone}`, value };
 }
 
 export interface CustomDomainSummary {
@@ -168,6 +224,8 @@ export async function fetchCustomDomains(
           status {
             certificateStatus
             verified
+            verificationDnsHost
+            verificationToken
             dnsRecords {
               recordType
               hostlabel
@@ -207,6 +265,8 @@ export async function createCustomDomain(
         status {
           certificateStatus
           verified
+          verificationDnsHost
+          verificationToken
           dnsRecords {
             recordType
             hostlabel
