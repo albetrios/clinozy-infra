@@ -48,6 +48,7 @@ export function frontendEnvFilePath(environmentName: string): string {
  * out meant every one of them had to be pasted by hand.
  */
 export function ciDeploySecrets(
+  environmentName: string,
   config: SetupConfig,
   secrets: SetupSecrets,
   state: SetupState,
@@ -62,8 +63,17 @@ export function ciDeploySecrets(
   if (config.providers.sentry.enabled && secrets.sentry?.authToken) {
     fresh.SENTRY_AUTH_TOKEN = secrets.sentry.authToken;
   }
-  // release-please in the frontend's CI — the same token the backend gets.
-  if (config.providers.github.enabled && secrets.github?.token) {
+  // release-please in the frontend's CI — the same token the backend gets. The frontend reads it
+  // from its default (development) environment only — "development, never production" in its
+  // .github/environments/README.md — so no other environment's file gets it.
+  const defaultEnvironment =
+    config.environments.find((environment) => environment.isDefault)?.name ??
+    config.environments[0]?.name;
+  if (
+    environmentName === defaultEnvironment &&
+    config.providers.github.enabled &&
+    secrets.github?.token
+  ) {
     fresh.RELEASE_PLEASE_TOKEN = secrets.github.token;
   }
   return fresh;
@@ -96,7 +106,7 @@ export function freshFrontendValues(
       fresh.SENTRY_PROJECT = config.frontend.name;
     }
   }
-  return { ...fresh, ...ciDeploySecrets(config, secrets, state) };
+  return { ...fresh, ...ciDeploySecrets(environmentName, config, secrets, state) };
 }
 
 /**

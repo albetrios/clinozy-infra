@@ -177,7 +177,7 @@ describe('CI deploy secrets for the frontend', () => {
   });
 
   it('writes the Netlify pair, the Sentry token and the release token when their providers are on', () => {
-    expect(ciDeploySecrets(allOn, secrets, withSite)).toEqual({
+    expect(ciDeploySecrets('development', allOn, secrets, withSite)).toEqual({
       NETLIFY_SITE_ID: 'site-123',
       NETLIFY_AUTH_TOKEN: 'fake-netlify-token',
       SENTRY_AUTH_TOKEN: 'fake-sentry-token',
@@ -185,12 +185,23 @@ describe('CI deploy secrets for the frontend', () => {
     });
   });
 
+  it('gives the release token to the default (development) environment only', () => {
+    const production = ciDeploySecrets('production', allOn, secrets, withSite);
+    expect(production).not.toHaveProperty('RELEASE_PLEASE_TOKEN');
+    expect(production).toMatchObject({ NETLIFY_SITE_ID: 'site-123' });
+  });
+
   it('writes nothing for a disabled provider or a value it does not have', () => {
-    expect(ciDeploySecrets(config({}), secrets, withSite)).toEqual({});
-    expect(ciDeploySecrets(allOn, emptySecrets, stateWithPosthog)).toEqual({});
+    expect(ciDeploySecrets('development', config({}), secrets, withSite)).toEqual({});
+    expect(ciDeploySecrets('development', allOn, emptySecrets, stateWithPosthog)).toEqual({});
     // Site not provisioned yet in this run: the token still goes out, the id waits for the site.
     expect(
-      ciDeploySecrets(config({ netlify: { enabled: true } }), secrets, stateWithPosthog),
+      ciDeploySecrets(
+        'development',
+        config({ netlify: { enabled: true } }),
+        secrets,
+        stateWithPosthog,
+      ),
     ).toEqual({ NETLIFY_AUTH_TOKEN: 'fake-netlify-token' });
   });
 });
