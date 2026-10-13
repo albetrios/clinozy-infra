@@ -23,8 +23,9 @@ const environmentSchema = z.object({
   label: z.string().min(1),
   nodeEnvironment: z.enum(['development', 'production']),
   // `deployBranch` is the git branch whose pushes deploy to this environment.
-  // It is NOT a Neon branch — Neon derives its branch from the environment
-  // `name` (see getNeonBranchName). `protected` mirrors the GitHub
+  // It is NOT a Neon branch — Neon derives its project and branch from the
+  // environment `name` (see neonEnvironmentNames), and a `protected`
+  // environment gets a protected Neon branch. `protected` mirrors the GitHub
   // branch-protection status used by deploy gates (`development` and
   // `production` are protected by default; ephemeral / preview environments
   // may set `protected: false`).
@@ -114,6 +115,9 @@ export const setupConfigSchema = z.object({
         min: z.number().min(0.25),
         max: z.number().min(0.25),
       }),
+      // Point-in-time restore window per environment name, in days. Neon caps it by plan
+      // (Free 0.25, Launch 7, Scale 30); an environment left out keeps Neon's default (1 day).
+      historyRetentionDays: z.record(z.string(), z.number().int().min(0).max(30)).optional(),
     }),
     railwayRedis: z.object({
       enabled: z.boolean(),
