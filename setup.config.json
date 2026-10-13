@@ -45,6 +45,10 @@
       "computeSize": {
         "min": 0.25,
         "max": 1
+      },
+      "historyRetentionDays": {
+        "development": 1,
+        "production": 7
       }
     },
     "railwayRedis": {

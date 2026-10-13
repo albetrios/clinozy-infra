@@ -211,8 +211,8 @@ function createdResourcesFor(
 ): string {
   switch (providerKey) {
     case 'neon': {
-      const branch = environmentName ? state.neon?.branches?.[environmentName] : undefined;
-      return branch?.branchId ? `branch ${branch.branchId}` : '—';
+      const project = environmentName ? state.neon?.projects?.[environmentName] : undefined;
+      return project?.projectId ? `project ${project.projectName} (${project.projectId})` : '—';
     }
     case 'aws': {
       if (!environmentName) return '—';

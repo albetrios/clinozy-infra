@@ -153,6 +153,7 @@ export function buildConfig(
         region: 'aws-us-east-2',
         pgVersion: 17,
         computeSize: { min: 0.25, max: 1 },
+        historyRetentionDays: { development: 1, production: 7 },
       },
       railwayRedis: {
         enabled: true,

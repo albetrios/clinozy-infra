@@ -1,7 +1,12 @@
 import { z } from 'zod';
 
-const neonBranchStateSchema = z.object({
+/** One environment's Neon project (names per `neonEnvironmentNames` in setup-neon.provider.ts). */
+const neonProjectStateSchema = z.object({
+  projectId: z.string(),
+  projectName: z.string(),
   branchId: z.string(),
+  databaseName: z.string(),
+  ownerRoleName: z.string(),
   endpointId: z.string(),
   databaseUrl: z.string(),
   databaseMigrationUrl: z.string().optional(),
@@ -72,8 +77,8 @@ export const setupStateSchema = z.object({
   updatedAt: z.string(),
   neon: z
     .object({
-      projectId: z.string(),
-      branches: z.record(z.string(), neonBranchStateSchema),
+      /** Keyed by environment name — one Neon project per environment. */
+      projects: z.record(z.string(), neonProjectStateSchema),
     })
     .optional(),
   redis: z

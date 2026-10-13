@@ -55,9 +55,28 @@ cannot end up in another environment.
 | **Google sign-in** | `OAUTH_GOOGLE_CLIENT_ID`, `OAUTH_GOOGLE_CLIENT_SECRET` | Google Cloud Console → Credentials → one Web OAuth client per environment; register the redirect URI setup prints (`OAUTH_GOOGLE_REDIRECT_URI` is derived — don't set it). |
 | **GitHub sign-in (GitHub App)** | `OAUTH_GITHUB_CLIENT_ID` / `_CLIENT_SECRET` | Pasted at apply per environment (or the manifest flow creates the app once). |
 
+## Neon projects
+
+Each environment gets **its own Neon project** — separate storage, history and computes, so one
+environment's data can never be branched into another. Every name derives from `project.name` and the
+environment name in `setup.config.json` (never Neon's `main` / `neondb` / `neondb_owner`):
+
+| | development | production |
+| --- | --- | --- |
+| Neon project | `<project>-development` | `<project>-production` |
+| Branch (the only one, protected when the environment is `protected`) | `development` | `production` |
+| Database | `<project_with_underscores>_development` | `<project_with_underscores>_production` |
+| Database owner (setup's admin login) | `<database>_owner` | `<database>_owner` |
+| History retention (`providers.neon.historyRetentionDays`) | 1 day | 7 days |
+
+For `clinozy-be`: projects `clinozy-be-development` / `clinozy-be-production`, databases
+`clinozy_be_development` / `clinozy_be_production`, owners `clinozy_be_development_owner` /
+`clinozy_be_production_owner`. Setup adopts an existing project only when it already carries these
+names; branch protection and the longer history need a paid Neon plan (a refused protection is a warning).
+
 ## Database users (Neon)
 
-Setup creates the backend's hosted database users on each environment's branch — **if a user already
+Setup creates the backend's hosted database users in each environment's project — **if a user already
 exists and the password in `.env.<environment>` still logs in, it is left untouched**; a missing user
 is created. If a user is **in use** but `.env.<environment>` has no working password for it, setup
 stops rather than change it (that would lock out the deployed app) — restore the file, or re-run with
@@ -72,9 +91,9 @@ created first.
 | `DATABASE_MAINTENANCE_URL` (pooled) | `<project>_maintenance` | maintenance pool (retention/cleanup jobs) — row-level security applies |
 | `DATABASE_MIGRATION_URL` (direct) | `<project>_migrator` | migrations, run by the deploy — `CREATEROLE BYPASSRLS`, full rights on the database and `public`, admin over the other backend roles |
 
-Workers use the same users. Not hosted: `<project>_operator` (local/CI fixtures). Neon's own
-`neondb_owner` is only setup's admin connection for creating these users — it is never written to an
-env file.
+Workers use the same users. Not hosted: `<project>_operator` (local/CI fixtures). The database owner
+(`<database>_owner`) is only setup's admin connection for creating these users — it is never written to
+an env file.
 
 ## What setup generates (outputs — do NOT hand-enter)
 

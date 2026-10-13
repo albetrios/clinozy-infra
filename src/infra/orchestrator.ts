@@ -539,11 +539,11 @@ export async function runProvision(options: ProvisionOptions = {}): Promise<void
 
   const summaryItems: Array<{ label: string; value: string | string[] }> = [];
 
-  if (state.neon?.projectId) {
-    summaryItems.push({ label: 'Neon Project', value: state.neon.projectId });
-    for (const [env, branch] of Object.entries(state.neon.branches)) {
-      summaryItems.push({ label: `  ${env} branch`, value: branch.branchId });
-    }
+  for (const [env, project] of Object.entries(state.neon?.projects ?? {})) {
+    summaryItems.push({
+      label: `Neon Project (${env})`,
+      value: `${project.projectName} (${project.projectId}) — database ${project.databaseName}`,
+    });
   }
 
   if (state.redis?.databases) {
@@ -723,7 +723,7 @@ export async function runStatus(options: { environments?: string[] } = {}): Prom
   const rows: Array<{ env: string; status: string; detail: string }> = [];
 
   for (const environment of config.environments) {
-    const neonOk = !!state.neon?.branches?.[environment.name]?.databaseUrl;
+    const neonOk = !!state.neon?.projects?.[environment.name]?.databaseUrl;
     const redisOk = config.providers.railwayRedis.enabled
       ? !!state.redis?.databases?.[environment.name]?.redisUrl
       : true;
