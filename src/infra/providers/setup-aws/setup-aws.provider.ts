@@ -13,6 +13,7 @@ import {
   CreateBucketCommand,
   PutPublicAccessBlockCommand,
   PutBucketCorsCommand,
+  GetBucketCorsCommand,
   PutBucketLifecycleConfigurationCommand,
   HeadBucketCommand,
   type BucketLocationConstraint,
@@ -29,6 +30,7 @@ import {
 import * as logger from '@setup/common/logger.js';
 import { SetupError } from '@setup/common/setup-error.js';
 import { readEnvFileValue } from '@setup/envs/read-env-file.js';
+import { allowedOriginsForEnvironment } from '@setup/envs/env-file-setup.util.js';
 import { isSecretFilled } from '@setup/common/secrets.js';
 import { resourceStatus } from '@setup/common/interactive-step.js';
 import type {
@@ -155,6 +157,11 @@ async function applyUserDataExportBucketLifecycle(
   );
 }
 
+/**
+ * The upload bucket's CORS: one rule admitting the environment's web app origins (its
+ * `ALLOWED_ORIGINS`). Must match `buildUploadBucketCorsRules` in clinozy-be's bucket-cors.util.ts:
+ * `POST` (presigned form) and `PUT` (presigned URL) write, `GET`/`HEAD` read a signed link back.
+ */
 function buildCorsRules(allowedOrigins: string[]): Array<{
   AllowedHeaders: string[];
   AllowedMethods: string[];
@@ -164,13 +171,63 @@ function buildCorsRules(allowedOrigins: string[]): Array<{
 }> {
   return [
     {
-      AllowedHeaders: ['*'],
-      AllowedMethods: ['PUT', 'GET', 'HEAD'],
       AllowedOrigins: allowedOrigins,
-      ExposeHeaders: ['ETag', 'Content-Length', 'Content-Type'],
+      AllowedMethods: ['POST', 'PUT', 'GET', 'HEAD'],
+      AllowedHeaders: ['content-type', 'x-amz-server-side-encryption'],
+      ExposeHeaders: ['ETag'],
       MaxAgeSeconds: 3600,
     },
   ];
+}
+
+function corsOriginsForEnvironment(config: SetupConfig, environmentName: string): string[] {
+  return allowedOriginsForEnvironment(config, environmentName)
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+}
+
+/** PutBucketCors replaces the bucket's whole CORS configuration with {@link buildCorsRules}. */
+async function applyBucketCors(
+  s3Client: S3Client,
+  bucketName: string,
+  allowedOrigins: string[],
+): Promise<void> {
+  await s3Client.send(
+    new PutBucketCorsCommand({
+      Bucket: bucketName,
+      CORSConfiguration: { CORSRules: buildCorsRules(allowedOrigins) },
+    }),
+  );
+}
+
+/** Whether the bucket's live CORS is exactly {@link buildCorsRules} (S3 has none → `NoSuchCORSConfiguration`). */
+async function bucketCorsMatches(
+  s3Client: S3Client,
+  bucketName: string,
+  allowedOrigins: string[],
+): Promise<boolean> {
+  try {
+    const response = await s3Client.send(new GetBucketCorsCommand({ Bucket: bucketName }));
+    const normalize = (rules: unknown): string =>
+      JSON.stringify(
+        (rules as Array<Record<string, unknown>> | undefined)?.map((rule) =>
+          Object.fromEntries(
+            [
+              'AllowedOrigins',
+              'AllowedMethods',
+              'AllowedHeaders',
+              'ExposeHeaders',
+              'MaxAgeSeconds',
+            ].map((key) => [key, rule[key] ?? null]),
+          ),
+        ) ?? [],
+      );
+    return normalize(response.CORSRules) === normalize(buildCorsRules(allowedOrigins));
+  } catch (error) {
+    if ((error as { name?: string }).name === 'NoSuchCORSConfiguration') return false;
+    throw error;
+  }
 }
 
 export async function provision(
@@ -243,36 +300,23 @@ export async function provision(
           }
         }
 
-        // Block public access
-        await s3Client.send(
-          new PutPublicAccessBlockCommand({
-            Bucket: bucketName,
-            PublicAccessBlockConfiguration: {
-              BlockPublicAcls: true,
-              IgnorePublicAcls: true,
-              BlockPublicPolicy: true,
-              RestrictPublicBuckets: true,
-            },
-          }),
-        );
-
-        // Set CORS
-        const allowedOrigins = config.app.allowedOrigins[environmentName];
-        if (allowedOrigins) {
-          await s3Client.send(
-            new PutBucketCorsCommand({
-              Bucket: bucketName,
-              CORSConfiguration: {
-                CORSRules: buildCorsRules(allowedOrigins.split(',')),
-              },
-            }),
-          );
-        }
-
         buckets[environmentName] = { name: bucketName, region: awsConfig.region };
       } else {
         logger.success(`  Bucket "${environmentName}" already configured`);
       }
+
+      // Re-asserted on every run: a bucket adopted from remote state skips the create branch above.
+      await s3Client.send(
+        new PutPublicAccessBlockCommand({
+          Bucket: bucketName,
+          PublicAccessBlockConfiguration: {
+            BlockPublicAcls: true,
+            IgnorePublicAcls: true,
+            BlockPublicPolicy: true,
+            RestrictPublicBuckets: true,
+          },
+        }),
+      );
 
       const lifecycleSpinner = logger.startSpinner(
         `Applying GDPR export lifecycle on "${bucketName}"...`,
@@ -288,6 +332,28 @@ export async function provision(
           lifecycleError instanceof Error ? lifecycleError.message : String(lifecycleError);
         logger.stopSpinner(lifecycleSpinner, `Lifecycle rule failed: ${message}`, 'fail');
         throw lifecycleError;
+      }
+
+      // Re-applied on every run, not only at creation, so an adopted bucket and a changed origin
+      // list both converge. The browser uploads straight to S3, so without this every upload fails.
+      const allowedOrigins = corsOriginsForEnvironment(config, environmentName);
+      if (allowedOrigins.length === 0) {
+        logger.warn(
+          `  No web app origin for "${environmentName}" (set app.allowedOrigins.${environmentName}) — bucket CORS not applied`,
+        );
+      } else {
+        const corsSpinner = logger.startSpinner(`Applying upload CORS on "${bucketName}"...`);
+        try {
+          await applyBucketCors(s3Client, bucketName, allowedOrigins);
+          logger.stopSpinner(
+            corsSpinner,
+            `CORS: uploads allowed from ${allowedOrigins.join(', ')}`,
+          );
+        } catch (corsError) {
+          const message = corsError instanceof Error ? corsError.message : String(corsError);
+          logger.stopSpinner(corsSpinner, `CORS rule failed: ${message}`, 'fail');
+          throw corsError;
+        }
       }
 
       // Create IAM user
@@ -422,16 +488,16 @@ export async function provision(
 }
 
 export async function check(
+  config: SetupConfig,
   state: SetupState,
   secrets: SetupSecrets,
-  region: string,
 ): Promise<boolean> {
   if (!state.aws?.buckets) {
     logger.error('AWS: no buckets in state');
     return false;
   }
 
-  const s3Client = createS3Client(secrets, region);
+  const s3Client = createS3Client(secrets, config.providers.aws.region);
   let allHealthy = true;
 
   for (const [environmentName, bucket] of Object.entries(state.aws.buckets)) {
@@ -441,11 +507,54 @@ export async function check(
     } catch {
       logger.error(`S3 bucket "${environmentName}" (${bucket.name}) — unreachable`);
       allHealthy = false;
+      continue;
+    }
+    const allowedOrigins = corsOriginsForEnvironment(config, environmentName);
+    if (allowedOrigins.length === 0) continue;
+    try {
+      if (await bucketCorsMatches(s3Client, bucket.name, allowedOrigins)) {
+        logger.success(
+          `S3 bucket "${environmentName}" CORS — uploads allowed from ${allowedOrigins.join(', ')}`,
+        );
+      } else {
+        logger.error(
+          `S3 bucket "${environmentName}" CORS — out of date; run \`pnpm setup:infra --providers aws\` to apply`,
+        );
+        allHealthy = false;
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.error(`S3 bucket "${environmentName}" CORS — unreadable: ${message}`);
+      allHealthy = false;
     }
   }
 
   s3Client.destroy();
   return allHealthy;
+}
+
+/** The environments whose upload bucket exists, as `{ environment: bucketName }` (HeadBucket). */
+async function findExistingBuckets(
+  config: SetupConfig,
+  secrets: SetupSecrets,
+  environments: string[],
+): Promise<Record<string, string>> {
+  const s3Client = createS3Client(secrets, config.providers.aws.region);
+  const existing: Record<string, string> = {};
+  try {
+    for (const environmentName of environments) {
+      const bucketName = `${config.providers.aws.s3BucketPrefix}-${environmentName}-uploads`;
+      try {
+        await s3Client.send(new HeadBucketCommand({ Bucket: bucketName }));
+        existing[environmentName] = bucketName;
+      } catch {
+        // bucket does not exist (or is not ours to read) — nothing to adopt
+      }
+    }
+  } finally {
+    s3Client.destroy();
+  }
+  return existing;
 }
 
 function allEnvironmentsHaveBucket(environments: string[], state: SetupState): boolean {
@@ -504,24 +613,22 @@ export const setupAwsProvider: InfraProvider = {
     } catch {
       return [];
     }
-    const s3Client = new S3Client({
-      region: config.providers.aws.region,
-      credentials: {
-        accessKeyId: secrets.aws.accessKeyId,
-        secretAccessKey: secrets.aws.secretAccessKey,
-      },
-    });
-    const existing: Array<{ provider: string; detail: string }> = [];
-    for (const environmentName of environments) {
-      const bucketName = `${config.providers.aws.s3BucketPrefix}-${environmentName}-uploads`;
-      try {
-        await s3Client.send(new HeadBucketCommand({ Bucket: bucketName }));
-        existing.push({ provider: 'AWS S3', detail: `bucket "${bucketName}" already exists` });
-      } catch {
-        // bucket does not exist — fine
-      }
+    const existing = await findExistingBuckets(config, secrets, environments);
+    return Object.values(existing).map((bucketName) => ({
+      provider: 'AWS S3',
+      detail: `bucket "${bucketName}" already exists`,
+    }));
+  },
+  // Run state is ephemeral: record each existing bucket so `check` (and `setup:infra:check`) can
+  // see it. IAM users are left to provision, which reuses the key in `.env.<environment>`.
+  detectRemote: async ({ config, secrets, state, environments, applyStateUpdates }) => {
+    const existing = await findExistingBuckets(config, secrets, environments);
+    if (Object.keys(existing).length === 0) return {};
+    const buckets = { ...(state.aws?.buckets ?? {}) };
+    for (const [environmentName, bucketName] of Object.entries(existing)) {
+      buckets[environmentName] = { name: bucketName, region: config.providers.aws.region };
     }
-    s3Client.destroy();
+    applyStateUpdates({ aws: { buckets, iamUsers: { ...(state.aws?.iamUsers ?? {}) } } });
     return existing;
   },
   describe: ({ config, environments }) => ({
@@ -620,6 +727,12 @@ export const setupAwsProvider: InfraProvider = {
         )
         .join(', ')}.`,
       `Will create or adopt one IAM user per environment for restricted bucket access.`,
+      `Will apply each bucket's upload CORS (replacing any existing rules) for the web app origins: ${context.environments
+        .map(
+          (environmentName) =>
+            `${environmentName} → ${allowedOriginsForEnvironment(context.config, environmentName) || '(none)'}`,
+        )
+        .join('; ')}.`,
     ],
     detectStatus: () =>
       resourceStatus(
@@ -647,11 +760,11 @@ export const setupAwsProvider: InfraProvider = {
         : 'no AWS resources recorded',
     }),
     verifyLive: async () => {
-      const ok = await check(context.state, context.secrets, context.config.providers.aws.region);
-      return { ok, message: ok ? 'reachable' : 'unreachable' };
+      const ok = await check(context.config, context.state, context.secrets);
+      return { ok, message: ok ? 'reachable, CORS current' : 'unreachable or CORS out of date' };
     },
   }),
-  check: ({ config, state, secrets }) => check(state, secrets, config.providers.aws.region),
+  check: ({ config, state, secrets }) => check(config, state, secrets),
   deleteInstructions: ({ config, state }) => {
     const buckets = state.aws?.buckets ?? {};
     const iamUsers = state.aws?.iamUsers ?? {};

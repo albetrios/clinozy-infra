@@ -15,6 +15,9 @@ import { isSecretFilled } from '@setup/common/secrets.js';
 import type { SetupConfig, SetupSecrets, SetupState } from '@setup/common/types.js';
 import { readEnvFileValue, upsertEnvFileValue } from './read-env-file.js';
 
+/** The frontend's local dev server (Vite's default port). */
+const LOCAL_FRONTEND_ORIGIN = 'http://localhost:5173';
+
 /** Default environment from config (`isDefault` flag, else first listed). */
 export function resolveDefaultEnvironmentName(config: SetupConfig): string {
   return (
@@ -89,14 +92,17 @@ export function appHostForEnvironment(
 }
 
 /**
- * CORS allowlist for an env: `app.allowedOrigins.<env>` when set, else the env's own frontend origin.
- * No fallback to another environment — production must never inherit development's origins.
+ * CORS allowlist for an env: `app.allowedOrigins.<env>` when set, else the env's own frontend origin
+ * — plus, in development, the local Vite app, because `.env.development` serves both the local stack
+ * and the deployed development site. The upload bucket's CORS admits the same list. No fallback to
+ * another environment — production must never inherit development's origins.
  */
 export function allowedOriginsForEnvironment(config: SetupConfig, environmentName: string): string {
-  return (
-    config.app.allowedOrigins[environmentName]?.trim() ||
-    frontendOriginForEnvironment(config, environmentName)
-  );
+  const configured = config.app.allowedOrigins[environmentName]?.trim();
+  if (configured) return configured;
+  const origins = [frontendOriginForEnvironment(config, environmentName)];
+  if (environmentName === 'development') origins.push(LOCAL_FRONTEND_ORIGIN);
+  return [...new Set(origins.filter(Boolean))].join(',');
 }
 
 /**
@@ -191,7 +197,7 @@ export function frontendOriginForEnvironment(config: SetupConfig, environmentNam
   if (configured && configured.trim().length > 0) return configured.trim();
   const host = appHostForEnvironment(config, environmentName);
   if (host) return `https://${host}`;
-  if (environmentName === 'development') return 'http://localhost:5173';
+  if (environmentName === 'development') return LOCAL_FRONTEND_ORIGIN;
   return '';
 }
 

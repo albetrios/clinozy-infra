@@ -41,8 +41,9 @@ describe('hosts derived from product.domain', () => {
     expect(frontendOriginForEnvironment(config, 'production')).toBe('https://app.acme.test');
     expect(backendOriginForEnvironment(config, 'production')).toBe('https://api.acme.test');
     expect(allowedOriginsForEnvironment(config, 'production')).toBe('https://app.acme.test');
+    // `.env.development` serves the local app too, so the local Vite origin rides along.
     expect(allowedOriginsForEnvironment(config, 'development')).toBe(
-      'https://development--acme-fe.netlify.app',
+      'https://development--acme-fe.netlify.app,http://localhost:5173',
     );
   });
 
