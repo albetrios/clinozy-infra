@@ -300,23 +300,23 @@ export async function provision(
           }
         }
 
-        // Block public access
-        await s3Client.send(
-          new PutPublicAccessBlockCommand({
-            Bucket: bucketName,
-            PublicAccessBlockConfiguration: {
-              BlockPublicAcls: true,
-              IgnorePublicAcls: true,
-              BlockPublicPolicy: true,
-              RestrictPublicBuckets: true,
-            },
-          }),
-        );
-
         buckets[environmentName] = { name: bucketName, region: awsConfig.region };
       } else {
         logger.success(`  Bucket "${environmentName}" already configured`);
       }
+
+      // Re-asserted on every run: a bucket adopted from remote state skips the create branch above.
+      await s3Client.send(
+        new PutPublicAccessBlockCommand({
+          Bucket: bucketName,
+          PublicAccessBlockConfiguration: {
+            BlockPublicAcls: true,
+            IgnorePublicAcls: true,
+            BlockPublicPolicy: true,
+            RestrictPublicBuckets: true,
+          },
+        }),
+      );
 
       const lifecycleSpinner = logger.startSpinner(
         `Applying GDPR export lifecycle on "${bucketName}"...`,
@@ -533,6 +533,30 @@ export async function check(
   return allHealthy;
 }
 
+/** The environments whose upload bucket exists, as `{ environment: bucketName }` (HeadBucket). */
+async function findExistingBuckets(
+  config: SetupConfig,
+  secrets: SetupSecrets,
+  environments: string[],
+): Promise<Record<string, string>> {
+  const s3Client = createS3Client(secrets, config.providers.aws.region);
+  const existing: Record<string, string> = {};
+  try {
+    for (const environmentName of environments) {
+      const bucketName = `${config.providers.aws.s3BucketPrefix}-${environmentName}-uploads`;
+      try {
+        await s3Client.send(new HeadBucketCommand({ Bucket: bucketName }));
+        existing[environmentName] = bucketName;
+      } catch {
+        // bucket does not exist (or is not ours to read) — nothing to adopt
+      }
+    }
+  } finally {
+    s3Client.destroy();
+  }
+  return existing;
+}
+
 function allEnvironmentsHaveBucket(environments: string[], state: SetupState): boolean {
   const buckets = state.aws?.buckets;
   if (!buckets) return false;
@@ -589,24 +613,22 @@ export const setupAwsProvider: InfraProvider = {
     } catch {
       return [];
     }
-    const s3Client = new S3Client({
-      region: config.providers.aws.region,
-      credentials: {
-        accessKeyId: secrets.aws.accessKeyId,
-        secretAccessKey: secrets.aws.secretAccessKey,
-      },
-    });
-    const existing: Array<{ provider: string; detail: string }> = [];
-    for (const environmentName of environments) {
-      const bucketName = `${config.providers.aws.s3BucketPrefix}-${environmentName}-uploads`;
-      try {
-        await s3Client.send(new HeadBucketCommand({ Bucket: bucketName }));
-        existing.push({ provider: 'AWS S3', detail: `bucket "${bucketName}" already exists` });
-      } catch {
-        // bucket does not exist — fine
-      }
+    const existing = await findExistingBuckets(config, secrets, environments);
+    return Object.values(existing).map((bucketName) => ({
+      provider: 'AWS S3',
+      detail: `bucket "${bucketName}" already exists`,
+    }));
+  },
+  // Run state is ephemeral: record each existing bucket so `check` (and `setup:infra:check`) can
+  // see it. IAM users are left to provision, which reuses the key in `.env.<environment>`.
+  detectRemote: async ({ config, secrets, state, environments, applyStateUpdates }) => {
+    const existing = await findExistingBuckets(config, secrets, environments);
+    if (Object.keys(existing).length === 0) return {};
+    const buckets = { ...(state.aws?.buckets ?? {}) };
+    for (const [environmentName, bucketName] of Object.entries(existing)) {
+      buckets[environmentName] = { name: bucketName, region: config.providers.aws.region };
     }
-    s3Client.destroy();
+    applyStateUpdates({ aws: { buckets, iamUsers: { ...(state.aws?.iamUsers ?? {}) } } });
     return existing;
   },
   describe: ({ config, environments }) => ({
