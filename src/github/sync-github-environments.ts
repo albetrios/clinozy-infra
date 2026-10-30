@@ -32,6 +32,7 @@ import dotenv from 'dotenv';
 import sodium from 'libsodium-wrappers';
 
 import { runGhAuthPreflight } from './auth-preflight.js';
+import { resolveRepository } from './gh.js';
 
 const RATE_LIMIT_BACKOFF_MS = [15_000, 30_000, 60_000, 120_000, 240_000] as const;
 
@@ -148,12 +149,6 @@ function sleep(milliseconds: number): Promise<void> {
 
 function getGitHubToken(): string {
   return execSync('gh auth token', { encoding: 'utf-8' }).trim();
-}
-
-function getRepositoryFullName(): string {
-  return execSync('gh api repos/:owner/:repo --jq .full_name', {
-    encoding: 'utf-8',
-  }).trim();
 }
 
 function buildGitHubApiUrl(pathname: string): string {
@@ -529,7 +524,12 @@ export async function syncEnvironmentToGitHub(
   const localSecretNames = new Set(secrets.map((s) => s.name));
   const localVariableNames = new Set(variables.map((v) => v.name));
 
+  // The backend repo (from setup.config.json), not the current directory's: this runs from
+  // clinozy-infra's checkout, so `gh api repos/:owner/:repo` would name clinozy-infra.
+  const repositoryFullName = resolveRepository();
+
   console.log(`Source:      .env.${environment}`);
+  console.log(`Repository:  ${repositoryFullName}`);
   console.log(`Environment: ${environment}`);
   console.log(`Plan:        ${secrets.length} secret(s), ${variables.length} variable(s)`);
   console.log('');
@@ -541,8 +541,6 @@ export async function syncEnvironmentToGitHub(
     console.log('Dry run — no API calls made. Drop --dry-run to push.');
     return { pushed: 0, skipped: 0, deleted: 0 };
   }
-
-  const repositoryFullName = getRepositoryFullName();
 
   if (!skipPreflight && process.env.GITHUB_SYNC_PARENT !== '1') {
     await runGhAuthPreflight({

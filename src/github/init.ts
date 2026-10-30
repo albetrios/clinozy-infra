@@ -328,8 +328,9 @@ export async function runGithubInit(args: {
   const allEnvironments = getGithubSyncEnvironmentNames(config);
 
   // Per-environment scope: narrow branches / rulesets / GitHub Environments to the requested
-  // environment(s). Each environment maps 1:1 to a branch (`config.environments[].deployBranch`) and
-  // a committed ruleset file `<branch>.json`, so filtering by env cleanly separates the work.
+  // environment(s). Each environment names its deploy branch (`config.environments[].deployBranch`)
+  // and that branch's committed ruleset `<branch>.json`. Single-trunk environments share `main`, so
+  // each per-environment pass re-checks it (idempotent).
   const scopeEnvironments = args.environmentNames;
   const scopedBranches = new Set(
     (scopeEnvironments
