@@ -6,12 +6,12 @@
  * `repos/owner/repo/environments/${env}` is passed as a SINGLE argument to `gh`, so shell
  * metacharacters (`;`, `$()`, `|`) in it are literal, not executed.
  *
- * Also centralizes repository resolution (env → git remote → gh) that was previously duplicated
- * across environments.ts, rulesets.ts, and sync-github-environments.ts.
+ * Also centralizes backend repository resolution (env → config → target git remote → gh) for
+ * environments.ts, rulesets.ts, init.ts, and sync-github-environments.ts.
  */
 import { runCommand, type RunCommandResult } from '@setup/common/exec.js';
 import { loadConfig } from '@setup/common/config.js';
-import { toolRoot } from '@setup/common/paths.js';
+import { targetRoot, toolRoot } from '@setup/common/paths.js';
 import { SetupError } from '@setup/common/setup-error.js';
 
 export interface GhOptions {
@@ -72,7 +72,10 @@ function repositoryFromGitRemote(cwd?: string): string | undefined {
   return undefined;
 }
 
-/** Resolve `owner/repo`: `GITHUB_REPOSITORY` env → git remote → `gh repo view`. Throws when none work. */
+/**
+ * Resolve the backend's `owner/repo`: `GITHUB_REPOSITORY` env → `providers.github.repository` →
+ * the target checkout's git remote → `gh repo view` in it. Throws when none work.
+ */
 export function resolveRepository(): string {
   if (process.env.GITHUB_REPOSITORY?.includes('/')) {
     return process.env.GITHUB_REPOSITORY;
@@ -89,20 +92,24 @@ export function resolveRepository(): string {
   })();
   if (configured?.includes('/')) return configured;
 
-  const fromGit = repositoryFromGitRemote();
+  // No config: ask the backend checkout, never the current directory — these scripts run from
+  // this tool's checkout.
+  const backendRoot = targetRoot();
+  const fromGit = repositoryFromGitRemote(backendRoot);
   if (fromGit) return fromGit;
 
   const result = runCommand('gh', {
     args: ['repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner'],
     allowFailure: true,
     timeoutMs: 15_000,
+    cwd: backendRoot,
   });
   if (result.status === 0 && result.stdout.trim()) {
     return result.stdout.trim();
   }
 
   throw new SetupError(
-    'Cannot resolve repository: set GITHUB_REPOSITORY, use a github.com git remote, or authenticate gh.',
+    `Cannot resolve the backend repository: set providers.github.repository in setup.config.json, give ${backendRoot} a github.com origin remote, or authenticate gh.`,
   );
 }
 

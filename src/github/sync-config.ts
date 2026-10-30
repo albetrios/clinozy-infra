@@ -51,19 +51,23 @@ function listGithubEnvironmentConfigs(): string[] {
   return names.sort();
 }
 
-function parseWorkflowBranchEnvironmentMap(): Map<string, string> {
+/**
+ * The environments reusable-railway-deploy.yml can deploy. Single-trunk: `main` deploys to every
+ * environment (development on merge, production on release), so the workflow never derives the
+ * environment from the branch. The caller names it (`github_environment`, or the dispatch
+ * `target`) and the resolve step allowlists it:
+ *
+ *   development|production) echo "environment=$environment" >> "$GITHUB_OUTPUT" ;;
+ *
+ * Returns undefined when the workflow is missing or has no such allowlist.
+ */
+function parseWorkflowEnvironmentAllowlist(): string[] | undefined {
+  if (!existsSync(deployWorkflowPath())) return undefined;
   const source = readFileSync(deployWorkflowPath(), 'utf-8');
-  const lineRegex = /([a-z][a-z0-9-]*)\)\s*echo\s+"environment=([a-z][a-z0-9-]*)"/g;
-  const map = new Map<string, string>();
-  for (const match of source.matchAll(lineRegex)) {
-    const branch = match[1];
-    const environment = match[2];
-    if (branch === undefined || environment === undefined) {
-      continue;
-    }
-    map.set(branch, environment);
-  }
-  return map;
+  const match = source.match(
+    /^\s*([a-z][a-z0-9-]*(?:\|[a-z][a-z0-9-]*)*)\)\s*echo\s+"environment=\$environment"/m,
+  );
+  return match?.[1]?.split('|').sort();
 }
 
 export function validateGithubSyncConsistency(config: SetupConfig): GitHubSyncConsistencyIssue[] {
@@ -71,14 +75,14 @@ export function validateGithubSyncConsistency(config: SetupConfig): GitHubSyncCo
   const configuredEnvironmentNames = new Set(syncEnvironments.map((e) => e.name));
   const configuredBranches = new Set(syncEnvironments.map((e) => e.branch));
   const githubEnvs = new Set(listGithubEnvironmentConfigs());
-  const workflowMap = parseWorkflowBranchEnvironmentMap();
+  const workflowEnvironments = parseWorkflowEnvironmentAllowlist();
   const issues: GitHubSyncConsistencyIssue[] = [];
 
-  for (const env of syncEnvironments) {
-    if (!existsSync(resolve(githubRulesetsDirectory(), `${env.branch}.json`))) {
+  for (const branch of configuredBranches) {
+    if (!existsSync(resolve(githubRulesetsDirectory(), `${branch}.json`))) {
       issues.push({
         dimension: 'setup.config.json ↔ rulesets',
-        detail: `Configured branch "${env.branch}" has no .github/rulesets/${env.branch}.json.`,
+        detail: `Configured branch "${branch}" has no .github/rulesets/${branch}.json.`,
       });
     }
   }
@@ -101,27 +105,28 @@ export function validateGithubSyncConsistency(config: SetupConfig): GitHubSyncCo
     }
   }
 
-  for (const [branch, env] of workflowMap.entries()) {
-    if (!configuredBranches.has(branch)) {
-      issues.push({
-        dimension: 'reusable-railway-deploy.yml ↔ setup.config.json',
-        detail: `Workflow branch "${branch}" is not listed in setup.config.json.`,
-      });
+  if (workflowEnvironments === undefined) {
+    issues.push({
+      dimension: 'reusable-railway-deploy.yml ↔ setup.config.json',
+      detail:
+        'reusable-railway-deploy.yml has no deploy environment allowlist (`<env>|<env>) echo "environment=$environment"`).',
+    });
+  } else {
+    for (const env of workflowEnvironments) {
+      if (!configuredEnvironmentNames.has(env)) {
+        issues.push({
+          dimension: 'reusable-railway-deploy.yml ↔ setup.config.json',
+          detail: `Workflow deploys environment "${env}", which is not listed in setup.config.json.`,
+        });
+      }
     }
-    if (!configuredEnvironmentNames.has(env)) {
-      issues.push({
-        dimension: 'reusable-railway-deploy.yml ↔ setup.config.json',
-        detail: `Workflow environment "${env}" is not listed in setup.config.json.`,
-      });
-    }
-  }
-
-  for (const env of syncEnvironments) {
-    if (workflowMap.get(env.branch) !== env.name) {
-      issues.push({
-        dimension: 'setup.config.json ↔ reusable-railway-deploy.yml',
-        detail: `Configured branch "${env.branch}" must map to environment "${env.name}" in reusable-railway-deploy.yml.`,
-      });
+    for (const env of configuredEnvironmentNames) {
+      if (!workflowEnvironments.includes(env)) {
+        issues.push({
+          dimension: 'setup.config.json ↔ reusable-railway-deploy.yml',
+          detail: `Configured environment "${env}" is not in the deploy allowlist of reusable-railway-deploy.yml.`,
+        });
+      }
     }
   }
 
@@ -131,17 +136,15 @@ export function validateGithubSyncConsistency(config: SetupConfig): GitHubSyncCo
 export function printGithubSyncConsistencyReport(config: SetupConfig): void {
   const syncEnvironments = environmentsFromConfig(config);
   const githubEnvs = listGithubEnvironmentConfigs();
-  const workflowMap = parseWorkflowBranchEnvironmentMap();
+  const workflowEnvironments = parseWorkflowEnvironmentAllowlist();
 
   console.log('Environment consistency');
   console.log('----------------------');
   console.log(
-    `Sync config:      ${syncEnvironments.map((e) => `${e.branch}→${e.name}`).join(', ')}`,
+    `Sync config:      ${syncEnvironments.map((e) => `${e.name} (branch ${e.branch})`).join(', ')}`,
   );
   console.log(`GitHub envs:      ${githubEnvs.join(', ')}`);
-  console.log(
-    `Workflow mapping: ${[...workflowMap.entries()].map(([b, e]) => `${b}→${e}`).join(', ')}`,
-  );
+  console.log(`Workflow envs:    ${workflowEnvironments?.join(', ') ?? '(no allowlist found)'}`);
   console.log('');
 }
 
@@ -149,9 +152,10 @@ export function getGithubSyncEnvironmentNames(config?: SetupConfig): string[] {
   return getEnvironmentNames(config ?? loadConfig()).sort();
 }
 
+/** Each deploy branch once — single-trunk environments share `main`. */
 export function getGithubSyncBranches(config?: SetupConfig): string[] {
   const cfg = config ?? loadConfig();
-  return cfg.environments.map((e) => e.deployBranch).sort();
+  return [...new Set(cfg.environments.map((e) => e.deployBranch))].sort();
 }
 
 function buildEnvironmentFile(environment: string, exampleContent: string): string {
