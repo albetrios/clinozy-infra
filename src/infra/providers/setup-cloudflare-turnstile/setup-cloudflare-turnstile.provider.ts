@@ -257,7 +257,7 @@ export const setupCloudflareTurnstileProvider: InfraProvider = {
     ],
     detectStatus: () =>
       resourceStatus(
-        everyEnvironmentHasEnvKeys(context.config, ['CAPTCHA_SITE_KEY', 'CAPTCHA_SECRET']),
+        everyEnvironmentHasEnvKeys(context.runEnvironments, ['CAPTCHA_SITE_KEY', 'CAPTCHA_SECRET']),
         'Turnstile widget per environment',
       ),
     execute: () => provisionTurnstile(context),

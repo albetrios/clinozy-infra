@@ -177,13 +177,14 @@ function warnIfEnvFilesNotGitignored(root: string, envFileNames: string[]): void
 /**
  * Writes `.env.<environment>` for each environment via surgical upsert. New files are seeded from
  * `.env.example`; existing files are edited in place — provisioned keys are updated/appended and
- * every other line (comments, custom keys, ordering) is preserved.
+ * every other line (comments, custom keys, ordering) is preserved. `scope` limits the export, in
+ * both apps, to those environments (`--env`); without it every configured environment is written.
  */
-export function exportEnvFiles(): ExportResult {
+export function exportEnvFiles(scope?: string[]): ExportResult {
   const config = loadConfig();
   const secrets = loadSecrets(config);
   const state = loadState();
-  const environments = getEnvironmentNames(config);
+  const environments = scope ?? getEnvironmentNames(config);
 
   const written: string[] = [];
   const merged: string[] = [];

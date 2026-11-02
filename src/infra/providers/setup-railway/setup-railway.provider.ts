@@ -303,8 +303,9 @@ export const RAILWAY_SERVICE_NAMES = ['api', 'worker'];
 /** The service that answers public HTTP (the worker has no inbound traffic). */
 const RAILWAY_PUBLIC_SERVICE = 'api';
 
-function formatRailwayEnvironmentPlan(config: SetupConfig): string {
+function formatRailwayEnvironmentPlan(config: SetupConfig, environments?: string[]): string {
   return config.environments
+    .filter((environment) => environments?.includes(environment.name) ?? true)
     .map(
       (environment) =>
         `${environment.name} (${environment.label}; branch ${environment.deployBranch}; services: ${RAILWAY_SERVICE_NAMES.join(', ')})`,
@@ -852,9 +853,9 @@ export const setupRailwayProvider: InfraProvider = {
     enabledReason: setupRailwayProvider.disabledReason(context),
     instructions: [
       `Will create or adopt the Railway project "${context.config.project.name}".`,
-      `Will create or adopt Railway environments: ${formatRailwayEnvironmentPlan(context.config)}.`,
+      `Will create or adopt Railway environments: ${formatRailwayEnvironmentPlan(context.config, context.runEnvironments)}.`,
       'Will create or adopt project-level services: api, worker (redis is provisioned separately via the Railway Redis template).',
-      'Will attach api + worker to every Railway environment via staged-changes.',
+      'Will attach api + worker to each of those environments via staged-changes.',
     ],
     detectStatus: () =>
       resourceStatus(

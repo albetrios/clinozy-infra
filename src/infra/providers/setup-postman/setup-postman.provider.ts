@@ -117,6 +117,7 @@ export async function provision(
   secrets: SetupSecrets,
   state: SetupState,
   environmentName: string,
+  runEnvironments: string[],
 ): Promise<ProviderResult> {
   const apiKey = secrets.postman.apiKey;
   if (!apiKey) {
@@ -143,12 +144,12 @@ export async function provision(
     return { success: false, message: `Postman: workspace setup failed — ${errorMessage(error)}` };
   }
   // Record the resolved workspace id back into each env file (it is an output, not an input).
-  for (const environment of config.environments) {
-    upsertEnvFileValue(environment.name, 'POSTMAN_WORKSPACE_ID', workspaceId);
+  for (const runEnvironment of runEnvironments) {
+    upsertEnvFileValue(runEnvironment, 'POSTMAN_WORKSPACE_ID', workspaceId);
   }
 
   // 2) Generate the OpenAPI spec + Postman collection for THIS environment (base URL baked in).
-  exportEnvFiles();
+  exportEnvFiles(runEnvironments);
   const subprocessEnv = toProcessEnvironment(
     buildEnvironmentVariables(environmentName, config, secrets, state),
   );
@@ -306,6 +307,7 @@ export const setupPostmanProvider: InfraProvider = {
           context.secrets,
           context.state,
           environmentName,
+          context.runEnvironments,
         );
         context.applyStateUpdates(result.stateUpdates ?? {});
         if (!result.success) throw new Error(result.message);

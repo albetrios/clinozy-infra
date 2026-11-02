@@ -48,6 +48,8 @@ import type {
 
 export interface ProvisionOptions {
   providerSelection?: ProviderSelectionInput;
+  /** `--env`: limit the run to these environments (every configured one when absent). */
+  environments?: string[];
 }
 
 export interface ProviderSelectionInput {
@@ -60,12 +62,14 @@ export function buildProviderContext(
   secrets: SetupSecrets,
   state: SetupState,
   environments: string[],
+  runEnvironments: string[] = environments,
 ): InfraProviderContext {
   return {
     config,
     secrets,
     state,
     environments,
+    runEnvironments,
     applyStateUpdates: (updates) => {
       Object.assign(state, updates);
       saveState(state);
@@ -124,6 +128,27 @@ export function selectProviders(input?: ProviderSelectionInput): readonly InfraP
   });
 }
 
+/**
+ * The environments a run may touch: `requested` (`--env`) in config order, or every configured one
+ * when absent. Fails on an unknown name, or on `--env` with no value (`[]`) — a run that guessed
+ * would provision more, or other, environments than the operator asked for.
+ */
+export function resolveEnvironmentScope(configured: string[], requested?: string[]): string[] {
+  if (requested === undefined) return configured;
+  const hint = `Configured environments: ${configured.join(', ')}`;
+  if (requested.length === 0) {
+    throw new SetupError('--env needs at least one environment name.', { hint });
+  }
+  const unknown = requested.filter((name) => !configured.includes(name));
+  if (unknown.length > 0) {
+    throw new SetupError(
+      `Unknown environment(s) in --env: ${unknown.join(', ')}. Nothing was provisioned.`,
+      { hint },
+    );
+  }
+  return configured.filter((name) => requested.includes(name));
+}
+
 function showProviderSelection(providers: readonly InfraProvider[]): void {
   logger.info(
     `Selected setup:infra providers: ${formatProviderKeys(providers.map((provider) => provider.key))}`,
@@ -133,19 +158,24 @@ function showProviderSelection(providers: readonly InfraProvider[]): void {
   );
 }
 
-function getEnvironmentBranchEntries(config: SetupConfig): logger.EnvironmentBranchEntry[] {
-  return config.environments.map((environment) => ({
-    name: environment.name,
-    label: environment.label,
-    branch: environment.deployBranch,
-    services: SETUP_SERVICE_NAMES.map(formatSetupServiceName),
-    ...(environment.isDefault !== undefined ? { isDefault: environment.isDefault } : {}),
-  }));
+function getEnvironmentBranchEntries(
+  config: SetupConfig,
+  environments: string[],
+): logger.EnvironmentBranchEntry[] {
+  return config.environments
+    .filter((environment) => environments.includes(environment.name))
+    .map((environment) => ({
+      name: environment.name,
+      label: environment.label,
+      branch: environment.deployBranch,
+      services: SETUP_SERVICE_NAMES.map(formatSetupServiceName),
+      ...(environment.isDefault !== undefined ? { isDefault: environment.isDefault } : {}),
+    }));
 }
 
 function showHeader(config: SetupConfig, environments: string[]): void {
   logger.banner(config.project.displayName, environments);
-  logger.environmentBranchMapping(getEnvironmentBranchEntries(config));
+  logger.environmentBranchMapping(getEnvironmentBranchEntries(config, environments));
 }
 
 async function confirm(message: string): Promise<boolean> {
@@ -186,8 +216,8 @@ async function confirmWord(message: string, word: string): Promise<boolean> {
   });
 }
 
-async function confirmBranchProceed(config: SetupConfig): Promise<boolean> {
-  const entries = getEnvironmentBranchEntries(config);
+async function confirmBranchProceed(config: SetupConfig, environments: string[]): Promise<boolean> {
+  const entries = getEnvironmentBranchEntries(config, environments);
   const summaryLine = entries
     .map((entry) => `${entry.branch} → ${entry.name} (${entry.services?.join(', ')})`)
     .join(', ');
@@ -232,7 +262,7 @@ function displaySettingsReview(
   logger.settingsReview(
     config.project.name,
     config.project.organization,
-    getEnvironmentBranchEntries(config),
+    getEnvironmentBranchEntries(config, context.environments),
     resources,
     extras,
   );
@@ -324,14 +354,14 @@ export function runPreview(options: { providerSelection?: ProviderSelectionInput
 export async function runProvision(options: ProvisionOptions = {}): Promise<void> {
   assertInteractive();
   const config = await reviewProjectIdentity();
-  const environments = getEnvironmentNames(config);
+  const environments = resolveEnvironmentScope(getEnvironmentNames(config), options.environments);
   const selectedProviders = selectProviders(options.providerSelection);
 
   showHeader(config, environments);
   showProviderSelection(selectedProviders);
   logger.blank();
 
-  if (!(await confirmBranchProceed(config))) {
+  if (!(await confirmBranchProceed(config, environments))) {
     throw new SetupAbort('Aborted. No resources were created.');
   }
   logger.blank();
@@ -351,13 +381,13 @@ export async function runProvision(options: ProvisionOptions = {}): Promise<void
   }
 
   const selectedKeys = new Set(selectedProviders.map((provider) => provider.key));
-  if (!(await checkPrerequisites(config, selectedKeys))) {
+  if (!(await checkPrerequisites(config, selectedKeys, environments))) {
     throw new SetupError('Prerequisites not met.');
   }
 
   // Decide which environments to set up ONCE — asked a single time here and honored by BOTH the
   // guide (key collection) and the provisioning phase, so the per-environment continue/skip/abort
-  // question is never repeated. (Under --yes every environment is kept.)
+  // question is never repeated. (Under --yes every environment in scope is kept.)
   const environmentFirst = usesEnvironmentFirstTraversal(environments);
   let activeEnvironments = environments;
   if (environmentFirst) {
@@ -485,7 +515,13 @@ export async function runProvision(options: ProvisionOptions = {}): Promise<void
         `Environment: ${environmentName}  (${environmentIndex + 1} of ${activeEnvironments.length})`,
       );
 
-      const environmentContext = buildProviderContext(config, secrets, state, [environmentName]);
+      const environmentContext = buildProviderContext(
+        config,
+        secrets,
+        state,
+        [environmentName],
+        environments,
+      );
       let stepNumber = 0;
       for (const provider of selectedProviders) {
         stepNumber += 1;
@@ -603,7 +639,7 @@ function buildExportEnvFilesStep(environments: string[]): StepDescriptor<unknown
       'Existing files are skipped to preserve local edits. These files are gitignored.',
     ],
     execute: async () => {
-      const result = exportEnvFiles();
+      const result = exportEnvFiles(environments);
       if (result.written.length > 0) {
         logger.success(`Created ${result.written.length} file(s): ${result.written.join(', ')}`);
       }
@@ -834,15 +870,12 @@ async function reconstructStateFromRemote(
   options: ReconstructStateOptions,
 ): Promise<{ foundCount: number; updatedProviderKeys: string[] }> {
   const { config, secrets, state, environments, providers, verbose = false } = options;
+  const context = buildProviderContext(config, secrets, state, environments);
   let foundCount = 0;
   const updatedProviderKeys: string[] = [];
 
   for (const provider of providers) {
-    if (
-      !provider.isEnabled({ config, secrets, state, environments, applyStateUpdates: () => {} })
-    ) {
-      continue;
-    }
+    if (!provider.isEnabled(context)) continue;
     if (!provider.detectRemote) {
       if (verbose) {
         logger.info(`${provider.name} — remote detection not available, skipping`);
@@ -852,16 +885,7 @@ async function reconstructStateFromRemote(
 
     const spinner = logger.startSpinner(`Querying ${provider.name}...`);
     try {
-      const resources = await provider.detectRemote({
-        config,
-        secrets,
-        state,
-        environments,
-        applyStateUpdates: (updates: Partial<SetupState>) => {
-          Object.assign(state, updates);
-          saveState(state);
-        },
-      });
+      const resources = await provider.detectRemote(context);
       const count = Object.keys(resources).length;
       if (count > 0) {
         foundCount += count;

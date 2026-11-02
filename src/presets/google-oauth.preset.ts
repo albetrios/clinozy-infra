@@ -14,15 +14,17 @@ import {
 } from '@setup/envs/env-file-setup.util.js';
 import type { GuidePreset } from './types.js';
 
-function buildGoogleOauthGuideInstructions(config: SetupConfig): string[] {
+function buildGoogleOauthGuideInstructions(
+  config: SetupConfig,
+  environmentNames: string[],
+): string[] {
   const projectName = config.project.name;
   const lines: string[] = [
     'No resource is created — create one Web-application OAuth client per environment in Google Cloud Console, then put its values in .setup/.setup-credentials; setup writes each `.env.<environment>`.',
     '',
   ];
 
-  for (const environment of config.environments) {
-    const environmentName = environment.name;
+  for (const environmentName of environmentNames) {
     const appName = oauthAppDisplayName(projectName, environmentName);
     // The redirect URI is the SPA's /callback/google page (FRONTEND origin): the browser lands
     // there with code+state and the SPA forwards them to the backend, which brokers the
@@ -108,7 +110,8 @@ export const googleOauthPreset: GuidePreset = {
     { key: 'OAUTH_GOOGLE_CLIENT_SECRET', description: 'Google OAuth client secret' },
     { key: 'OAUTH_GOOGLE_REDIRECT_URI', description: 'SPA OAuth redirect URI (/callback/google)' },
   ],
-  instructions: ({ config }) => buildGoogleOauthGuideInstructions(config),
+  instructions: ({ config, runEnvironments }) =>
+    buildGoogleOauthGuideInstructions(config, runEnvironments),
   guide: {
     scope: 'per-environment',
     guideError: 'guide-only — set OAUTH_GOOGLE_*__<environment> in .setup/.setup-credentials',

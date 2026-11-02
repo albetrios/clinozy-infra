@@ -63,6 +63,21 @@ pnpm setup:infra --providers neon,stripe          # or -r neon,stripe
 SETUP_INFRA_PROVIDERS=neon pnpm setup:infra --yes  # SETUP_INFRA_SKIP_PROVIDERS=postman skips instead
 ```
 
+Scope a run to some environments (comma-separated):
+
+```bash
+pnpm setup:infra --providers turnstile --env development   # or -e development
+```
+
+`--env` limits the whole run — the provider steps, the pre-flight, and the Finalize export in both
+apps — so another environment's resources and `.env.<environment>` are not touched. A name that is
+not in `setup.config.json`, or `--env` with no value, stops the run before anything is provisioned.
+Without `--env` every configured environment is processed.
+
+Resources one project shares across environments (the Railway project and its services, the Sentry
+project, the Postman workspace, the Netlify site) are still created or adopted. A GitHub App created
+by a scoped run covers only those environments, so a later run for the others creates a second app.
+
 ## Idempotent by default
 
 Every step checks what already exists before acting:
@@ -84,7 +99,7 @@ environment, `netlify` finds or creates the frontend site.
 
 | Script | Action |
 | --- | --- |
-| `setup:infra` | Apply. `--yes`/`-y` = unattended (never prompts); `--force` re-collects values that are already set and allows re-keying a database user that is in use |
+| `setup:infra` | Apply. `--yes`/`-y` = unattended (never prompts); `--force` re-collects values that are already set and allows re-keying a database user that is in use; `--env`/`-e` limits it to some environments (see [Quick start](#quick-start)) |
 | `setup:infra:init` | Interactive wizard → `setup.config.json` (and the credentials template) |
 | `setup:infra:plan` | Read-only diff per provider; `--remote` (or `setup:infra:inspect`) for live truth |
 | `setup:infra:inspect` | Live remote inspection: present/absent + config-vs-remote field diff |

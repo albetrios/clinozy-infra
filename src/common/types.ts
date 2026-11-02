@@ -123,7 +123,13 @@ export interface InfraProviderContext {
   config: SetupConfig;
   secrets: SetupSecrets;
   state: SetupState;
+  /** The environments this step handles — one at a time under per-environment traversal. */
   environments: string[];
+  /**
+   * Every environment this run may touch (`--env`, else all configured). Anything a step writes
+   * beyond its own `environments` — one app's credentials, an account-wide id — stops at this list.
+   */
+  runEnvironments: string[];
   applyStateUpdates: (updates: Partial<SetupState>) => void;
 }
 

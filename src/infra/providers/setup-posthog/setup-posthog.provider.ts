@@ -103,16 +103,16 @@ async function readPosthogErrorBody(response: Response): Promise<string> {
  * later runs adopt it directly here — no API call, no repeated create attempt, no repeated
  * "cannot create … reusing" warning.
  */
-function readPerEnvProjectApiKeys(config: SetupConfig): Record<string, string> | null {
+function readPerEnvProjectApiKeys(environmentNames: string[]): Record<string, string> | null {
   const globalKey = getEnvSetupValue('POSTHOG_PROJECT_API_KEY');
   const keys: Record<string, string> = {};
-  for (const environment of config.environments) {
+  for (const environmentName of environmentNames) {
     const key =
-      readEnvFileValue(environment.name, 'POSTHOG_PROJECT_API_KEY') ??
-      readEnvFileValue(environment.name, 'POSTHOG_KEY') ??
+      readEnvFileValue(environmentName, 'POSTHOG_PROJECT_API_KEY') ??
+      readEnvFileValue(environmentName, 'POSTHOG_KEY') ??
       globalKey;
     if (!key) return null;
-    keys[environment.name] = key;
+    keys[environmentName] = key;
   }
   return keys;
 }
@@ -269,15 +269,15 @@ async function resolvePerEnvProjectKeys(
   credentials: PosthogSetupCredentials,
   apiHost: string,
   config: SetupConfig,
+  environmentNames: string[],
 ): Promise<{ projectApiKeys: Record<string, string> } | { error: string }> {
-  const environmentNames = config.environments.map((environment) => environment.name);
   const sameKeyEverywhere = (key: string): { projectApiKeys: Record<string, string> } => ({
     projectApiKeys: Object.fromEntries(environmentNames.map((name) => [name, key])),
   });
 
   if (credentials.projectApiKey) return sameKeyEverywhere(credentials.projectApiKey);
 
-  const fromEnvFiles = readPerEnvProjectApiKeys(config);
+  const fromEnvFiles = readPerEnvProjectApiKeys(environmentNames);
   if (fromEnvFiles) return { projectApiKeys: fromEnvFiles };
 
   const { personalApiKey } = credentials;
@@ -378,7 +378,10 @@ async function resolvePerEnvProjectKeys(
   }
 }
 
-export async function provision(config: SetupConfig): Promise<ProviderResult> {
+export async function provision(
+  config: SetupConfig,
+  environmentNames: string[],
+): Promise<ProviderResult> {
   if (!config.providers.posthog.enabled) {
     return { success: true, message: 'PostHog: skipped (disabled)' };
   }
@@ -386,7 +389,7 @@ export async function provision(config: SetupConfig): Promise<ProviderResult> {
   const credentials = readPosthogCredentials();
   const { apiHost, ingestHost } = resolveHosts(config.providers.posthog.region);
   const spinner = logger.startSpinner('Resolving PostHog project keys...');
-  const resolved = await resolvePerEnvProjectKeys(credentials, apiHost, config);
+  const resolved = await resolvePerEnvProjectKeys(credentials, apiHost, config, environmentNames);
 
   if ('error' in resolved) {
     logger.failActiveSpinner(`PostHog: ${resolved.error}`);
@@ -433,8 +436,11 @@ async function pastePosthogProjectKeys(
   });
 }
 
-async function provisionFromPastedProjectKeys(config: SetupConfig): Promise<ProviderResult> {
-  const projectApiKeys = readPerEnvProjectApiKeys(config);
+async function provisionFromPastedProjectKeys(
+  config: SetupConfig,
+  environmentNames: string[],
+): Promise<ProviderResult> {
+  const projectApiKeys = readPerEnvProjectApiKeys(environmentNames);
   if (!projectApiKeys) {
     return {
       success: false,
@@ -556,8 +562,8 @@ export const setupPosthogProvider: InfraProvider = {
     instructions: [
       'Get a Personal API key (phx_…): https://us.posthog.com/settings/user-api-keys → "Create personal API key" → "All access".',
       'Put it in .setup/.setup-credentials as POSTHOG_PERSONAL_API_KEY=… (setup input — never used at API runtime).',
-      `Setup resolves ONE shared project per environment (${context.config.environments
-        .map((environment) => productResourceName(context.config, environment.name))
+      `Setup resolves ONE shared project per environment (${context.runEnvironments
+        .map((environmentName) => productResourceName(context.config, environmentName))
         .join(
           ', ',
         )}) inside org "${context.config.project.organization}", then writes POSTHOG_KEY + POSTHOG_HOST to each .env.<environment>. The same project serves the frontend.`,
@@ -568,14 +574,14 @@ export const setupPosthogProvider: InfraProvider = {
     detectStatus: () =>
       resourceStatus(hasResolvedKey(context.state), 'PostHog project key(s) in state'),
     execute: async () => {
-      let result = await provision(context.config);
+      let result = await provision(context.config, context.runEnvironments);
       if (!result.success && isPosthogPermissionError(result.message)) {
         logger.warn(
           '  PostHog API cannot create projects — paste Project API keys (phc_…) from each project in the PostHog UI.',
         );
         const pasteResult = await pastePosthogProjectKeys(context);
         assertCredentialCollectionNotAborted(pasteResult);
-        result = await provisionFromPastedProjectKeys(context.config);
+        result = await provisionFromPastedProjectKeys(context.config, context.runEnvironments);
         if (result.success) {
           result = {
             ...result,

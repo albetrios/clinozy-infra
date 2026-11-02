@@ -201,9 +201,9 @@ export function frontendOriginForEnvironment(config: SetupConfig, environmentNam
   return '';
 }
 
-export function everyEnvironmentHasEnvKeys(config: SetupConfig, keys: string[]): boolean {
-  return config.environments.every((environment) =>
-    keys.every((key) => isSecretFilled(readEnvFileValue(environment.name, key))),
+export function everyEnvironmentHasEnvKeys(environments: string[], keys: string[]): boolean {
+  return environments.every((environmentName) =>
+    keys.every((key) => isSecretFilled(readEnvFileValue(environmentName, key))),
   );
 }
 

@@ -168,6 +168,11 @@ export const setup<Name>Provider: InfraProvider = {
 > `runInteractiveStep` detects existence and prompts. Validate-only providers omit it and
 > simply re-validate each run.
 
+> **Environment scope:** `context.environments` is what this step handles (one environment at a
+> time under per-environment traversal); `context.runEnvironments` is everything the run may touch
+> (`--env`, else all configured). Anything written beyond the step's own environments stops at
+> `runEnvironments` — never loop over `config.environments` to write.
+
 Implement `deleteInstructions(context)` whenever the provider provisions tracked resources
 (records `stateUpdates`) — returns dashboard URL + identifiers for the manual `--delete` guide). Never add a
 `destroy` method — `setup:infra` does not delete resources.

@@ -121,8 +121,8 @@ async function probeGithubOauthCredentials(
   }
 }
 
-function hasCompleteGithubOauthConfig(config: SetupConfig): boolean {
-  return everyEnvironmentHasEnvKeys(config, [
+function hasCompleteGithubOauthConfig(environments: string[]): boolean {
+  return everyEnvironmentHasEnvKeys(environments, [
     'OAUTH_GITHUB_CLIENT_ID',
     'OAUTH_GITHUB_CLIENT_SECRET',
   ]);
@@ -181,12 +181,12 @@ function githubOauthPasteOnly(): boolean {
 }
 
 function githubOauthUsesManifest(): boolean {
-  // The manifest flow creates ONE GitHub App covering every environment's callback URL (it reads
-  // config.environments, not the per-step context), so it runs regardless of whether this step is
+  // The manifest flow creates ONE GitHub App covering every environment in the run (it reads
+  // runEnvironments, not the per-step environments), so it runs regardless of whether this step is
   // processing one env or all of them. Under per-environment traversal the first env that needs it
-  // creates the app and writes creds into every .env.<environment>; later envs then see complete,
-  // valid config and simply validate — no duplicate apps, no forced paste. Paste-only opt-out
-  // (SETUP_INFRA_GITHUB_OAUTH_PASTE_ONLY=1) still forces manual entry.
+  // creates the app and writes creds into each run environment's .env.<environment>; later envs then
+  // see complete, valid config and simply validate — no duplicate apps, no forced paste. Paste-only
+  // opt-out (SETUP_INFRA_GITHUB_OAUTH_PASTE_ONLY=1) still forces manual entry.
   return !githubOauthPasteOnly();
 }
 
@@ -209,10 +209,10 @@ async function pasteGithubCredentials(
   });
 }
 
-/** Create the GitHub App via the manifest flow and write its credentials into every env file. */
+/** Create the GitHub App via the manifest flow and write its credentials into each run env file. */
 async function provisionGithubApp(context: InfraProviderContext): Promise<boolean> {
-  const callbackUrls = context.config.environments
-    .map((environment) => githubCallbackUrl(context.config, environment.name))
+  const callbackUrls = context.runEnvironments
+    .map((environmentName) => githubCallbackUrl(context.config, environmentName))
     .filter(Boolean);
   if (callbackUrls.length === 0) {
     logger.warn(
@@ -222,7 +222,7 @@ async function provisionGithubApp(context: InfraProviderContext): Promise<boolea
   }
   const homepageUrl = backendOriginForEnvironment(
     context.config,
-    context.config.environments[0]?.name ?? 'development',
+    context.runEnvironments[0] ?? 'development',
   );
   try {
     const app = await createGithubAppViaManifest({
@@ -230,12 +230,12 @@ async function provisionGithubApp(context: InfraProviderContext): Promise<boolea
       homepageUrl,
       callbackUrls,
     });
-    for (const environment of context.config.environments) {
-      const redirectUri = githubCallbackUrl(context.config, environment.name);
-      upsertEnvFileValue(environment.name, 'OAUTH_GITHUB_CLIENT_ID', app.clientId);
-      upsertEnvFileValue(environment.name, 'OAUTH_GITHUB_CLIENT_SECRET', app.clientSecret);
+    for (const environmentName of context.runEnvironments) {
+      const redirectUri = githubCallbackUrl(context.config, environmentName);
+      upsertEnvFileValue(environmentName, 'OAUTH_GITHUB_CLIENT_ID', app.clientId);
+      upsertEnvFileValue(environmentName, 'OAUTH_GITHUB_CLIENT_SECRET', app.clientSecret);
       if (redirectUri)
-        upsertEnvFileValue(environment.name, 'OAUTH_GITHUB_REDIRECT_URI', redirectUri);
+        upsertEnvFileValue(environmentName, 'OAUTH_GITHUB_REDIRECT_URI', redirectUri);
     }
     logger.success(
       `  GitHub App "${app.slug}" created — credentials written to .env.<environment>.`,
@@ -294,7 +294,7 @@ export const setupGithubAppWithOauthProvider: InfraProvider = {
     enabledReason: setupGithubAppWithOauthProvider.disabledReason(context),
     instructions: buildGithubAppGuideInstructions(context.config, context.environments),
     execute: async () => {
-      if (hasCompleteGithubOauthConfig(context.config)) {
+      if (hasCompleteGithubOauthConfig(context.runEnvironments)) {
         const existing = await validateGithubOauth(context);
         if (existing.success) return existing;
         logger.warn(
@@ -302,7 +302,7 @@ export const setupGithubAppWithOauthProvider: InfraProvider = {
             ? '  GitHub rejected the OAUTH_GITHUB_* values in .env.<environment> — paste replacement credentials per environment.'
             : '  GitHub rejected the OAUTH_GITHUB_* values in .env.<environment> — creating a new GitHub App to replace them.',
         );
-      } else if (everyEnvironmentHasEnvKeys(context.config, ['OAUTH_GITHUB_CLIENT_ID'])) {
+      } else if (everyEnvironmentHasEnvKeys(context.runEnvironments, ['OAUTH_GITHUB_CLIENT_ID'])) {
         logger.warn(
           '  OAUTH_GITHUB_CLIENT_ID is set but OAUTH_GITHUB_CLIENT_SECRET is missing in one or more env files — creating via manifest (or paste).',
         );

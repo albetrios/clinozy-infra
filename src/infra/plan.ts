@@ -284,12 +284,13 @@ export function renderProvisionedDetail(
   const { state } = context;
 
   // Outcome per step ("<provider> · <env>" → OK/FAIL/SKIP/…), so every row is marked created/failed.
+  // A one-environment run (`--env development`) names its steps without the environment.
   const statusByStep = new Map(
     summarizeOutcomes([...outcomes]).rows.map((row) => [row.env, row.status]),
   );
   const statusFor = (providerName: string, environmentName?: string): string => {
     const lookup = (environment: string): string | undefined =>
-      statusByStep.get(`${providerName} · ${environment}`);
+      statusByStep.get(`${providerName} · ${environment}`) ?? statusByStep.get(providerName);
     let token: string | undefined;
     if (environmentName) {
       token = lookup(environmentName);

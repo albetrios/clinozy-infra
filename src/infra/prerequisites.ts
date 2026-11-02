@@ -390,8 +390,12 @@ function checkConfig(config: SetupConfig, selected?: ReadonlySet<string>): boole
 }
 
 /** Step 4: report what `.setup-credentials` still lacks (the credentials guide asks next). */
-function reportCredentials(config: SetupConfig, selected?: ReadonlySet<string>): void {
-  const statuses = credentialStatus(config, getEnvironmentNames(config), selected);
+function reportCredentials(
+  config: SetupConfig,
+  selected?: ReadonlySet<string>,
+  environments: readonly string[] = getEnvironmentNames(config),
+): void {
+  const statuses = credentialStatus(config, environments, selected);
   const complete = statuses.filter((status) => status.missing.length === 0);
   if (complete.length > 0) {
     logger.success(`Set — ${complete.map((status) => status.label).join(', ')}`);
@@ -412,6 +416,7 @@ function reportCredentials(config: SetupConfig, selected?: ReadonlySet<string>):
 export async function checkPrerequisites(
   config: SetupConfig,
   selectedProviderKeys?: ReadonlySet<string>,
+  environments?: readonly string[],
 ): Promise<boolean> {
   let allPassed = true;
 
@@ -440,7 +445,7 @@ export async function checkPrerequisites(
   if (!checkConfig(config, selectedProviderKeys)) allPassed = false;
 
   section(4, 'Credentials (.setup/.setup-credentials)');
-  reportCredentials(config, selectedProviderKeys);
+  reportCredentials(config, selectedProviderKeys, environments);
 
   logger.blank();
   if (allPassed) {
