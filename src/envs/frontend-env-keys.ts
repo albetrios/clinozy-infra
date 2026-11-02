@@ -3,9 +3,10 @@
  *
  * clinozy-fe is a fully independent target: these are written straight into the frontend repo's own
  * `.env.<environment>` (resolved via {@link frontendRoot}) via a SURGICAL upsert — only the mapped
- * `VITE_*` keys, the build-time Sentry identifiers (`SENTRY_ORG`, `SENTRY_PROJECT`) and the CI deploy
- * secrets (see {@link ciDeploySecrets}) are written; every other clinozy-fe key, comment, and blank
- * line is preserved byte-for-byte. Mirrors the backend upsert in `export-env-files.ts`.
+ * `VITE_*` keys, the build-time `STORED_FILES_ORIGIN` and Sentry identifiers (`SENTRY_ORG`,
+ * `SENTRY_PROJECT`) and the CI deploy secrets (see {@link ciDeploySecrets}) are written; every other
+ * clinozy-fe key, comment, and blank line is preserved byte-for-byte. Mirrors the backend upsert in
+ * `export-env-files.ts`.
  */
 import { resolve } from 'node:path';
 import { frontendRoot } from '@setup/common/paths.js';
@@ -14,6 +15,7 @@ import { upsertEnvContent } from '@setup/engine/index.js';
 import { resolveEnvironmentVariables } from '@setup/envs/build-env-vars.js';
 import { deployedApiOrigin } from '@setup/envs/env-file-setup.util.js';
 import { escapeEnvValue } from '@setup/envs/env-file-format.util.js';
+import { readEnvFile } from '@setup/envs/read-env-file.js';
 
 /** Canonical backend key → Vite env name for clinozy-fe. All values are public (browser-safe). */
 export const FRONTEND_ENV_KEY_MAPPINGS = [
@@ -111,6 +113,15 @@ export function freshFrontendValues(
   // until the Railway provider has recorded it, so a stateless export keeps the existing value.
   const apiOrigin = deployedApiOrigin(state, environmentName);
   if (apiOrigin) fresh.VITE_API_BASE_URL = apiOrigin;
+  // The S3 bucket origin clinozy-fe's CSP names (connect-src, img-src): build-time, never bundled, and
+  // the virtual-hosted form clinozy-be's AWS SDK signs. A first-run backend file is seeded from its
+  // `.env.example`, so a bucket still at that seed value is a placeholder, not a bucket. It is skipped
+  // like a missing bucket or region, so a stateless export keeps the existing value.
+  const bucket = variables.S3_BUCKET;
+  const region = variables.S3_REGION;
+  if (bucket && region && bucket !== readEnvFile('example').S3_BUCKET) {
+    fresh.STORED_FILES_ORIGIN = `https://${bucket}.s3.${region}.amazonaws.com`;
+  }
   // Non-VITE, build-time Sentry identifiers for clinozy-fe's sourcemap upload — public, sourced from
   // config (single source of truth). The token half comes with the other CI secrets below.
   if (config.providers.sentry.enabled) {
@@ -125,7 +136,7 @@ export function freshFrontendValues(
 }
 
 /**
- * Surgically upsert the fresh VITE_/Sentry values into clinozy-fe's existing env text (`baseText` —
+ * Surgically upsert the fresh values into clinozy-fe's existing env text (`baseText` —
  * the current `.env.<environment>` on a re-run, or the `.env.example` seed / fallback header on
  * first run). Only the mapped keys change; every other line is preserved byte-for-byte.
  */

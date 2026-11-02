@@ -23,7 +23,7 @@ export interface GuideService {
   credentials: string[];
   /** Env vars this service produces / you paste into `.env.<env>`. */
   outputs: string[];
-  /** Mirrored clinozy-fe `VITE_*` keys, if any. */
+  /** clinozy-fe keys this service feeds, if any. */
   feKeys: string[];
   /** Ordered one-by-one walkthrough (from the preset, else derived from the catalog). */
   steps: string[];
@@ -56,6 +56,8 @@ function feKeysFor(name: string, outputs: string[]): string[] {
   }
   // Sentry also ships the build-time identifiers into clinozy-fe.
   if (name === 'Sentry') out.push('SENTRY_ORG', 'SENTRY_PROJECT');
+  // clinozy-fe's CSP names the bucket, derived from S3_BUCKET + S3_REGION.
+  if (name === 'AWS S3') out.push('STORED_FILES_ORIGIN');
   return out;
 }
 

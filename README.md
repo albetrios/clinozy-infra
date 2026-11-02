@@ -98,7 +98,7 @@ these roots strictly separate (see `src/common/paths.ts`):
 - **target root** = the backend repo being provisioned (default sibling `../clinozy-be`). Holds the
   app artifacts the tool reads/writes — `.env.<environment>`, `.env.example`, `.github/**`.
 - **frontend root** = the frontend repo (default sibling `../clinozy-fe`), a **fully independent
-  target**. The tool writes its `.env.<environment>` (browser-safe `VITE_*` keys, merged onto
+  target**. The tool writes its `.env.<environment>` (`VITE_*` and build-time keys, merged onto
   clinozy-fe's own `.env.example`) exactly the way it writes clinozy-be's.
 
 `clinozy-infra` does **not** read or write either repo's `env-schema` — the env schema is each
@@ -135,9 +135,9 @@ CLINOZY_BE_DIR=/path/to/clinozy-be pnpm setup:infra:status
 - **The docs providers write into the target repo.** The Scalar/Postman providers run
   `pnpm docs:*` inside `../clinozy-be`, so the target repo's dependencies must be installed.
 - **clinozy-be and clinozy-fe are independent env targets.** Provisioning writes/overwrites the provisioned
-  keys into each repo's own `.env.<environment>` (clinozy-be backend keys; clinozy-fe browser-safe
-  `VITE_*`), preserving every non-provisioned key. Managing the env **schema** is each project's job,
-  not this tool's.
+  keys into each repo's own `.env.<environment>` (clinozy-be backend keys; clinozy-fe `VITE_*` and
+  build-time keys), preserving every non-provisioned key. Managing the env **schema** is each
+  project's job, not this tool's.
 
 ## Scripts
 

@@ -75,11 +75,12 @@ describe('buildGuideData', () => {
     expect(neon?.steps.join(' ')).toContain('.setup/.setup-credentials');
   });
 
-  it('derives clinozy-fe VITE_ mirror keys (Sentry, PostHog)', () => {
+  it('derives the clinozy-fe keys each service feeds (Sentry, PostHog, AWS S3)', () => {
     expect(serviceByName('Sentry')?.feKeys).toEqual(
       expect.arrayContaining(['VITE_SENTRY_DSN', 'SENTRY_ORG', 'SENTRY_PROJECT']),
     );
     expect(serviceByName('PostHog')?.feKeys).toContain('VITE_POSTHOG_KEY');
+    expect(serviceByName('AWS S3')?.feKeys).toEqual(['STORED_FILES_ORIGIN']);
   });
 });
 

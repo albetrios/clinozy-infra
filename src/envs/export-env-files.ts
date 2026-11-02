@@ -211,8 +211,8 @@ export function exportEnvFiles(scope?: string[]): ExportResult {
 
 /**
  * Export ONLY the frontend (clinozy-fe) `.env.<environment>` files — clinozy-be is never touched.
- * Same surgical semantics as the full export: upsert the mapped `VITE_*` keys, preserve every
- * other clinozy-fe key. Gated on `frontend.name` + the clinozy-fe repo being present.
+ * Same surgical semantics as the full export: upsert the provisioned keys, preserve every other
+ * clinozy-fe key. Gated on `frontend.name` + the clinozy-fe repo being present.
  */
 export function exportFrontendOnly(): Pick<ExportResult, 'frontendWritten' | 'frontendMerged'> {
   const config = loadConfig();

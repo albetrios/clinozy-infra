@@ -27,7 +27,7 @@ export function renderInfraConfigTs(presets: readonly Preset[]): string {
     "} from './src/presets/index.js';",
     '',
     'export default defineInfraConfig({',
-    '  // Both targets currently use `.env.<environment>`; clinozy-fe receives only VITE_* keys.',
+    '  // Both targets currently use `.env.<environment>`; clinozy-fe receives only the keys in src/envs/frontend-env-keys.ts.',
     '  envFiles: {',
     '    backend: (env) => `.env.${env}`,',
     '    frontend: (env) => `.env.${env}`,',

@@ -102,6 +102,7 @@ an env file.
 | `DATABASE_URL`, `DATABASE_MAINTENANCE_URL`, `DATABASE_MIGRATION_URL` | Neon — the database users above |
 | `REDIS_URL` | Railway Redis provisioning |
 | `S3_*` | AWS bucket + IAM user |
+| `STORED_FILES_ORIGIN` (frontend) | Derived from `S3_BUCKET` + `S3_REGION` — the bucket origin clinozy-fe's CSP names at build time |
 | `SENTRY_DSN` | Sentry backend project (`project.name`) create/adopt |
 | `SENTRY_FRONTEND_DSN` | Sentry **frontend** project (`frontend.name`) — browser-safe, for clinozy-fe |
 | `POSTHOG_KEY`, `POSTHOG_HOST` | One shared PostHog project per env (`<product>-<env>`), resolved from `POSTHOG_PERSONAL_API_KEY` |
