@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -147,6 +147,94 @@ describe('frontend env export (surgical)', () => {
     expect(
       freshFrontendValues('development', baseConfig, emptySecrets, stateWithPosthog),
     ).not.toHaveProperty('VITE_API_BASE_URL');
+  });
+
+  describe('STORED_FILES_ORIGIN', () => {
+    const developmentOrigin = 'https://clinozy-be-development-uploads.s3.us-east-1.amazonaws.com';
+    const awsConfig = {
+      ...baseConfig,
+      providers: { ...disabledProviders, aws: { ...disabledProviders.aws, enabled: true } },
+    } as unknown as SetupConfig;
+    const stateWithBucket = (iamUsers: Record<string, unknown>) =>
+      ({
+        ...stateWithPosthog,
+        aws: {
+          buckets: { development: { name: 'clinozy-be-development-uploads', region: 'us-east-1' } },
+          iamUsers,
+        },
+      }) as unknown as SetupState;
+    const backendEnvFile = (fileName: string, content: string) =>
+      writeFileSync(join(backendDir, fileName), content);
+
+    it('derives the bucket origin from what the AWS provider recorded', () => {
+      const state = stateWithBucket({
+        development: { accessKeyId: 'fake-id', secretAccessKey: 'fake-secret' },
+      });
+      const fresh = freshFrontendValues('development', awsConfig, emptySecrets, state);
+
+      expect(fresh).toMatchObject({ STORED_FILES_ORIGIN: developmentOrigin });
+      // Unquoted: the value clinozy-fe's isHttpsOrigin rule parses.
+      expect(buildFrontendEnvContent('STORED_FILES_ORIGIN=\n', fresh)).toContain(
+        `STORED_FILES_ORIGIN=${developmentOrigin}\n`,
+      );
+    });
+
+    it("derives each environment's origin from its own backend env file on a stateless run", () => {
+      backendEnvFile(
+        '.env.development',
+        'S3_BUCKET=clinozy-be-development-uploads\nS3_REGION=us-east-1\n',
+      );
+      backendEnvFile(
+        '.env.production',
+        'S3_BUCKET=clinozy-be-production-uploads\nS3_REGION=eu-west-1\n',
+      );
+
+      expect(
+        freshFrontendValues('development', baseConfig, emptySecrets, stateWithPosthog),
+      ).toMatchObject({ STORED_FILES_ORIGIN: developmentOrigin });
+      expect(
+        freshFrontendValues('production', baseConfig, emptySecrets, stateWithPosthog),
+      ).toMatchObject({
+        STORED_FILES_ORIGIN: 'https://clinozy-be-production-uploads.s3.eu-west-1.amazonaws.com',
+      });
+    });
+
+    it.each([
+      ['the region is missing', 'S3_BUCKET=clinozy-be-development-uploads\n'],
+      ['the bucket is missing', 'S3_REGION=us-east-1\n'],
+      ['the bucket is blank', 'S3_BUCKET=\nS3_REGION=us-east-1\n'],
+      ['the region is blank', 'S3_BUCKET=clinozy-be-development-uploads\nS3_REGION=\n'],
+    ])('skips the key when %s, keeping the existing value', (_case, envFile) => {
+      backendEnvFile('.env.development', envFile);
+      const fresh = freshFrontendValues('development', baseConfig, emptySecrets, stateWithPosthog);
+
+      expect(fresh).not.toHaveProperty('STORED_FILES_ORIGIN');
+      const existing = `STORED_FILES_ORIGIN=${developmentOrigin}\n`;
+      expect(buildFrontendEnvContent(existing, fresh)).toContain(existing);
+    });
+
+    it('skips the key with no backend env file and nothing in state', () => {
+      expect(
+        freshFrontendValues('development', baseConfig, emptySecrets, stateWithPosthog),
+      ).not.toHaveProperty('STORED_FILES_ORIGIN');
+    });
+
+    it('skips the key until the AWS provider has the IAM user as well as the bucket', () => {
+      expect(
+        freshFrontendValues('development', awsConfig, emptySecrets, stateWithBucket({})),
+      ).not.toHaveProperty('STORED_FILES_ORIGIN');
+    });
+
+    it("skips a bucket still at the seed value from clinozy-be's .env.example", () => {
+      // A first-run backend file is seeded from .env.example, so its placeholder resolves as a value.
+      const seed = 'S3_BUCKET=your-bucket\nS3_REGION=us-east-1\n';
+      backendEnvFile('.env.example', seed);
+      backendEnvFile('.env.development', seed);
+
+      expect(
+        freshFrontendValues('development', baseConfig, emptySecrets, stateWithPosthog),
+      ).not.toHaveProperty('STORED_FILES_ORIGIN');
+    });
   });
 
   it('writes build-time SENTRY_ORG + SENTRY_PROJECT from config', () => {

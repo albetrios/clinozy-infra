@@ -9,7 +9,7 @@
  * - **target root** — the backend application repo being provisioned (default sibling `../clinozy-be`).
  *   Holds app artifacts the tool reads/writes: `.env.<environment>`, `.env.example`, `.github/**`.
  * - **frontend root** — the frontend application repo (default sibling `../clinozy-fe`), a fully
- *   independent target. The tool writes its `.env.<environment>` (browser-safe `VITE_*` keys) the
+ *   independent target. The tool writes its `.env.<environment>` (`VITE_*` and build-time keys) the
  *   same way it writes clinozy-be's. See {@link frontendRoot}.
  *
  * Target resolution order: `CLINOZY_BE_DIR` env → an explicit override set via {@link setTargetRoot}

@@ -33,7 +33,7 @@ import {
 } from './src/presets/index.js';
 
 export default defineInfraConfig({
-  // Both targets currently use `.env.<environment>`; clinozy-fe receives only browser-safe VITE_* keys.
+  // Both targets currently use `.env.<environment>`; clinozy-fe receives only the keys in src/envs/frontend-env-keys.ts.
   envFiles: {
     backend: (env) => `.env.${env}`,
     frontend: (env) => `.env.${env}`,
