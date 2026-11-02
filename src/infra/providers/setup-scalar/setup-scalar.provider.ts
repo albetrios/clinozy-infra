@@ -103,6 +103,7 @@ export async function provision(
   secrets: SetupSecrets,
   state: SetupState,
   environmentName: string,
+  runEnvironments: string[],
 ): Promise<ProviderResult> {
   const apiKey = secrets.scalar.apiKey;
   if (!apiKey) {
@@ -119,7 +120,7 @@ export async function provision(
 
   // Sync .env.<environment> from current state (preserving non-provisioned keys) so the
   // subprocess' dotenv loader doesn't override the injected env with stale empty values.
-  exportEnvFiles();
+  exportEnvFiles(runEnvironments);
 
   const environment = toProcessEnvironment(
     buildEnvironmentVariables(environmentName, config, secrets, state),
@@ -298,6 +299,7 @@ export const setupScalarProvider: InfraProvider = {
           context.secrets,
           context.state,
           environmentName,
+          context.runEnvironments,
         );
         context.applyStateUpdates(result.stateUpdates ?? {});
         if (!result.success) throw new Error(result.message);

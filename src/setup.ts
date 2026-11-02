@@ -130,9 +130,13 @@ function getProviderSelection(): ProviderSelectionInput {
   };
 }
 
-/** `-e` / `--env`: scope to a subset of environments (comma-separated). */
+/**
+ * `-e` / `--env`: scope to a subset of environments (comma-separated). `[]` = the flag with no
+ * value, which provisioning rejects rather than reading it as "no scope" and running everywhere.
+ */
 function getEnvScope(): string[] | undefined {
-  return parseProviderList('--env') ?? parseProviderList('-e');
+  const flagGiven = args.some((arg) => /^(--env|-e)(=|$)/.test(arg));
+  return parseProviderList('--env') ?? parseProviderList('-e') ?? (flagGiven ? [] : undefined);
 }
 
 function printHelp(): void {
@@ -193,7 +197,9 @@ function printHelp(): void {
   );
   logger.info('  --providers neon,jwt,github           Run only these provider keys');
   logger.info('  -r, --resource neon,jwt               Alias for --providers (scope resources)');
-  logger.info('  -e, --env development                 Scope to environment(s) (status / guide)');
+  logger.info(
+    '  -e, --env development                 Limit to environment(s): provisioning, --status, --guide (unknown names fail)',
+  );
   logger.info('  --skip-providers postman,oauth        Run all except these provider keys');
   logger.info('  SETUP_INFRA_PROVIDERS=neon,jwt        Env allow-list for AI/automation prompts');
   logger.info('  SETUP_INFRA_SKIP_PROVIDERS=postman    Env skip-list for AI/automation prompts');
@@ -259,7 +265,7 @@ async function main(): Promise<void> {
         await runReconstruct({ providerSelection });
         break;
       case 'provision':
-        await runProvision({ providerSelection });
+        await runProvision(omitUndefined({ providerSelection, environments: getEnvScope() }));
         break;
       case 'check':
         await runCheck({ providerSelection });

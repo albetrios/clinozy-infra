@@ -24,8 +24,9 @@ import type {
   InfraProviderContext,
 } from '@setup/common/types.js';
 
-function formatGitHubEnvironmentPlan(config: SetupConfig): string {
+function formatGitHubEnvironmentPlan(config: SetupConfig, environments: string[]): string {
   return config.environments
+    .filter((environment) => environments.includes(environment.name))
     .map(
       (environment) =>
         `${environment.name} (${environment.label}; branch ${environment.deployBranch}; Railway services: api, worker + redis database)`,
@@ -156,13 +157,13 @@ export const setupGithubProvider: InfraProvider = {
           configKey: 'GITHUB_TOKEN',
         }
       : null,
-  settingsReview: ({ config }) =>
+  settingsReview: ({ config, environments }) =>
     config.providers.github.enabled
       ? [
           {
             bucket: 'resource',
             provider: 'GitHub',
-            detail: `GitHub Environments in ${[config.providers.github.repository, frontendRepository(config)].filter(Boolean).join(' + ')} (${formatGitHubEnvironmentPlan(config)})`,
+            detail: `GitHub Environments in ${[config.providers.github.repository, frontendRepository(config)].filter(Boolean).join(' + ')} (${formatGitHubEnvironmentPlan(config, environments)})`,
           },
         ]
       : [],

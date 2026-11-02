@@ -112,11 +112,13 @@ export function buildEnvironmentVariables(
   Object.assign(variables, deriveIdentityVariables(environmentName, config));
 
   // Each provider owns its own `.env.<environment>` slice (Neon → DATABASE_URL, AWS → S3_*, …).
+  const environments = config.environments.map((env) => env.name);
   const context: InfraProviderContext = {
     config,
     secrets,
     state,
-    environments: config.environments.map((env) => env.name),
+    environments,
+    runEnvironments: environments,
     applyStateUpdates: () => {},
   };
   for (const provider of getInfraProviders()) {
